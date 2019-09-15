@@ -690,8 +690,8 @@ std::string CoolingBuffer::apply_layer_cooldown(
                     double t = (layer_time - slowdown_below_layer_time) / (fan_below_layer_time - slowdown_below_layer_time);
                     fan_speed_new = int(floor(t * min_fan_speed + (1. - t) * max_fan_speed) + 0.5);
                 }
-                // Use the higher of the adjusted speeds if automatic cooling is enabled.
-                if (fan_speed_new > external_perimeter_fan_speed)
+                // Use the higher of the adjusted speeds if both external perimeter and automatic cooling are enabled.
+                if (external_perimeter_fan_speed && fan_speed_new > external_perimeter_fan_speed)
                     external_perimeter_fan_speed = fan_speed_new;
             }
             bridge_fan_speed   = EXTRUDER_CONFIG(bridge_fan_speed);
