@@ -52,6 +52,8 @@ public:
         Range width;
         // Color mapping by feedrate.
         Range feedrate;
+        // Color mapping by fan speed.
+        Range fan_speed;
         // Color mapping by volumetric extrusion rate.
         Range volumetric_rate;
     };
@@ -74,30 +76,52 @@ public:
             Height,
             Width,
             Feedrate,
+            FanSpeed,
             VolumetricRate,
             Tool,
             ColorPrint,
             Num_View_Types
         };
 
-        static const unsigned int Num_Extrusion_Roles = (unsigned int)erMixed + 1;
-        static const Color Default_Extrusion_Role_Colors[Num_Extrusion_Roles];
-        static const std::string Default_Extrusion_Role_Names[Num_Extrusion_Roles];
+        static const Color Default_Extrusion_Role_Colors[erCount];
+        static const std::string Default_Extrusion_Role_Names[erCount];
         static const EViewType Default_View_Type;
+
+		class Path
+		{
+		public:
+		    Polyline 		polyline;
+		    ExtrusionRole 	extrusion_role;
+		    // Volumetric velocity. mm^3 of plastic per mm of linear head motion. Used by the G-code generator.
+		    float			mm3_per_mm;
+		    // Width of the extrusion, used for visualization purposes.
+		    float 			width;
+		    // Height of the extrusion, used for visualization purposes.
+		    float 			height;
+		    // Feedrate of the extrusion, used for visualization purposes.
+		    float 			feedrate;
+		    // Id of the extruder, used for visualization purposes.
+		    uint32_t		extruder_id;
+		    // Id of the color, used for visualization purposes in the color printing case.
+		    uint32_t	 	cp_color_id;
+		    // Fan speed for the extrusion, used for visualization purposes.
+		    float 			fan_speed;
+		};
+		using Paths = std::vector<Path>;
 
         struct Layer
         {
             float z;
-            ExtrusionPaths paths;
+            Paths paths;
 
-            Layer(float z, const ExtrusionPaths& paths);
+            Layer(float z, const Paths& paths);
         };
 
         typedef std::vector<Layer> LayersList;
 
         EViewType view_type;
-        Color role_colors[Num_Extrusion_Roles];
-        std::string role_names[Num_Extrusion_Roles];
+        Color role_colors[erCount];
+        std::string role_names[erCount];
         LayersList layers;
         unsigned int role_flags;
 
@@ -206,6 +230,7 @@ public:
     Color get_height_color(float height) const;
     Color get_width_color(float width) const;
     Color get_feedrate_color(float feedrate) const;
+    Color get_fan_speed_color(float fan_speed) const;
     Color get_volumetric_rate_color(float rate) const;
 
     void set_extrusion_role_color(const std::string& role_name, float red, float green, float blue, float alpha);

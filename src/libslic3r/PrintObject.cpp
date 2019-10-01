@@ -12,7 +12,6 @@
 #include <boost/log/trivial.hpp>
 #include <float.h>
 
-#include <tbb/task_scheduler_init.h>
 #include <tbb/parallel_for.h>
 #include <tbb/atomic.h>
 
@@ -75,13 +74,9 @@ PrintBase::ApplyStatus PrintObject::set_copies(const Points &points)
 {
     // Order copies with a nearest-neighbor search.
     std::vector<Point> copies;
-    {
-        std::vector<Points::size_type> ordered_copies;
-        Slic3r::Geometry::chained_path(points, ordered_copies);
-        copies.reserve(ordered_copies.size());
-        for (size_t point_idx : ordered_copies)
-            copies.emplace_back(points[point_idx] + m_copies_shift);
-    }
+    copies.reserve(points.size());
+    for (const Point &pt : points)
+        copies.emplace_back(pt + m_copies_shift);
     // Invalidate and set copies.
     PrintBase::ApplyStatus status = PrintBase::APPLY_STATUS_UNCHANGED;
     if (copies != m_copies) {
@@ -258,8 +253,8 @@ void PrintObject::prepare_infill()
     m_print->throw_if_canceled();
     
     // Decide what surfaces are to be filled.
-    // Here the S_TYPE_TOP / S_TYPE_BOTTOMBRIDGE / S_TYPE_BOTTOM infill is turned to just S_TYPE_INTERNAL if zero top / bottom infill layers are configured.
-    // Also tiny S_TYPE_INTERNAL surfaces are turned to S_TYPE_INTERNAL_SOLID.
+    // Here the stTop / stBottomBridge / stBottom infill is turned to just stInternal if zero top / bottom infill layers are configured.
+    // Also tiny stInternal surfaces are turned to stInternalSolid.
     BOOST_LOG_TRIVIAL(info) << "Preparing fill surfaces..." << log_memory_info();
     for (auto *layer : m_layers)
         for (auto *region : layer->m_regions) {
@@ -271,8 +266,8 @@ void PrintObject::prepare_infill()
     // and rearrange top/bottom/internal surfaces
     // It produces enlarged overlapping bridging areas.
     //
-    // 1) S_TYPE_BOTTOMBRIDGE / S_TYPE_BOTTOM infill is grown by 3mm and clipped by the total infill area. Bridges are detected. The areas may overlap.
-    // 2) S_TYPE_TOP is grown by 3mm and clipped by the grown bottom areas. The areas may overlap.
+    // 1) stBottomBridge / stBottom infill is grown by 3mm and clipped by the total infill area. Bridges are detected. The areas may overlap.
+    // 2) stTop is grown by 3mm and clipped by the grown bottom areas. The areas may overlap.
     // 3) Clip the internal surfaces by the grown top/bottom surfaces.
     // 4) Merge surfaces with the same style. This will mostly get rid of the overlaps.
     //FIXME This does not likely merge surfaces, which are supported by a material with different colors, but same properties.
@@ -468,9 +463,17 @@ bool PrintObject::invalidate_state_by_config_options(const std::vector<t_config_
             || opt_key == "support_material_contact_distance" 
             || opt_key == "xy_size_compensation") {
             steps.emplace_back(posSlice);
+        } else if (opt_key == "support_material") {
+            steps.emplace_back(posSupportMaterial);
+            if (m_config.support_material_contact_distance == 0.) {
+            	// Enabling / disabling supports while soluble support interface is enabled.
+            	// This changes the bridging logic (bridging enabled without supports, disabled with supports).
+            	// Reset everything.
+            	// See GH #1482 for details.
+	            steps.emplace_back(posSlice);
+	        }
         } else if (
-               opt_key == "support_material"
-            || opt_key == "support_material_auto"
+        	   opt_key == "support_material_auto"
             || opt_key == "support_material_angle"
             || opt_key == "support_material_buildplate_only"
             || opt_key == "support_material_enforce_layers"
@@ -524,8 +527,13 @@ bool PrintObject::invalidate_state_by_config_options(const std::vector<t_config_
             steps.emplace_back(posPerimeters);
             steps.emplace_back(posSupportMaterial);
         } else if (opt_key == "bridge_flow_ratio") {
-            steps.emplace_back(posPerimeters);
-            steps.emplace_back(posInfill);
+            if (m_config.support_material_contact_distance > 0.) {
+            	// Only invalidate due to bridging if bridging is enabled.
+            	// If later "support_material_contact_distance" is modified, the complete PrintObject is invalidated anyway.
+            	steps.emplace_back(posPerimeters);
+            	steps.emplace_back(posInfill);
+	            steps.emplace_back(posSupportMaterial);
+	        }
         } else if (
                opt_key == "seam_position"
             || opt_key == "seam_preferred_direction"
@@ -810,15 +818,72 @@ void PrintObject::process_external_surfaces()
 {
     BOOST_LOG_TRIVIAL(info) << "Processing external surfaces..." << log_memory_info();
 
+    // Cached surfaces covered by some extrusion, defining regions, over which the from the surfaces one layer higher are allowed to expand.
+    std::vector<Polygons> surfaces_covered;
+    // Is there any printing region, that has zero infill? If so, then we don't want the expansion to be performed over the complete voids, but only
+    // over voids, which are supported by the layer below.
+    bool 				  has_voids = false;
+	for (size_t region_id = 0; region_id < this->region_volumes.size(); ++ region_id)
+		if (! this->region_volumes.empty() && this->print()->regions()[region_id]->config().fill_density == 0) {
+			has_voids = true;
+			break;
+		}
+	if (has_voids && m_layers.size() > 1) {
+	    // All but stInternal fill surfaces will get expanded and possibly trimmed.
+	    std::vector<unsigned char> layer_expansions_and_voids(m_layers.size(), false);
+	    for (size_t layer_idx = 0; layer_idx < m_layers.size(); ++ layer_idx) {
+	    	const Layer *layer = m_layers[layer_idx];
+	    	bool expansions = false;
+	    	bool voids      = false;
+	    	for (const LayerRegion *layerm : layer->regions()) {
+	    		for (const Surface &surface : layerm->fill_surfaces.surfaces) {
+	    			if (surface.surface_type == stInternal)
+	    				voids = true;
+	    			else
+	    				expansions = true;
+	    			if (voids && expansions) {
+	    				layer_expansions_and_voids[layer_idx] = true;
+	    				goto end;
+	    			}
+	    		}
+	    	}
+		end:;
+		}
+	    BOOST_LOG_TRIVIAL(debug) << "Collecting surfaces covered with extrusions in parallel - start";
+	    surfaces_covered.resize(m_layers.size() - 1, Polygons());
+    	auto unsupported_width = - float(scale_(0.3 * EXTERNAL_INFILL_MARGIN));
+	    tbb::parallel_for(
+	        tbb::blocked_range<size_t>(0, m_layers.size() - 1),
+	        [this, &surfaces_covered, &layer_expansions_and_voids, unsupported_width](const tbb::blocked_range<size_t>& range) {
+	            for (size_t layer_idx = range.begin(); layer_idx < range.end(); ++ layer_idx)
+	            	if (layer_expansions_and_voids[layer_idx + 1]) {
+		                m_print->throw_if_canceled();
+		                Polygons voids;
+		                for (const LayerRegion *layerm : m_layers[layer_idx]->regions()) {
+		                	if (layerm->region()->config().fill_density.value == 0.)
+		                		for (const Surface &surface : layerm->fill_surfaces.surfaces)
+		                			// Shrink the holes, let the layer above expand slightly inside the unsupported areas.
+		                			polygons_append(voids, offset(surface.expolygon, unsupported_width));
+		                }
+		                surfaces_covered[layer_idx] = diff(to_polygons(this->m_layers[layer_idx]->slices.expolygons), voids);
+	            	}
+	        }
+	    );
+	    m_print->throw_if_canceled();
+	    BOOST_LOG_TRIVIAL(debug) << "Collecting surfaces covered with extrusions in parallel - end";
+	}
+
 	for (size_t region_id = 0; region_id < this->region_volumes.size(); ++region_id) {
         BOOST_LOG_TRIVIAL(debug) << "Processing external surfaces for region " << region_id << " in parallel - start";
         tbb::parallel_for(
             tbb::blocked_range<size_t>(0, m_layers.size()),
-            [this, region_id](const tbb::blocked_range<size_t>& range) {
+            [this, &surfaces_covered, region_id](const tbb::blocked_range<size_t>& range) {
                 for (size_t layer_idx = range.begin(); layer_idx < range.end(); ++ layer_idx) {
                     m_print->throw_if_canceled();
                     // BOOST_LOG_TRIVIAL(trace) << "Processing external surface, layer" << m_layers[layer_idx]->print_z;
-                    m_layers[layer_idx]->get_region((int)region_id)->process_external_surfaces((layer_idx == 0) ? NULL : m_layers[layer_idx - 1]);
+                    m_layers[layer_idx]->get_region((int)region_id)->process_external_surfaces(
+                    	(layer_idx == 0) ? nullptr : m_layers[layer_idx - 1],
+                    	(layer_idx == 0 || surfaces_covered.empty() || surfaces_covered[layer_idx - 1].empty()) ? nullptr : &surfaces_covered[layer_idx - 1]);
                 }
             }
         );
@@ -1315,7 +1380,7 @@ void PrintObject::bridge_over_infill()
                                 )};
                             push @new_surfaces, map Slic3r::Surface->new(
                                 expolygon       => $_,
-                                surface_type    => S_TYPE_INTERNALVOID,
+                                surface_type    => stInternalVoid,
                             ), @{intersection_ex(
                                 [ map $_->p, @$group ],
                                 [ map @$_, @$to_bridge ],
@@ -1410,7 +1475,7 @@ SlicingParameters PrintObject::slicing_parameters(const DynamicPrintConfig& full
 
     if (object_max_z <= 0.f)
         object_max_z = (float)model_object.raw_bounding_box().size().z();
-	return SlicingParameters::create_from_config(print_config, object_config, object_max_z, object_extruders);
+    return SlicingParameters::create_from_config(print_config, object_config, object_max_z, object_extruders);
 }
 
 // returns 0-based indices of extruders used to print the object (without brim, support and other helper extrusions)
@@ -1443,11 +1508,8 @@ bool PrintObject::update_layer_height_profile(const ModelObject &model_object, c
         layer_height_profile.clear();
 
     if (layer_height_profile.empty()) {
-    	if (0)
-//        if (this->layer_height_profile.empty())
-        	layer_height_profile = layer_height_profile_adaptive(slicing_parameters, model_object.layer_config_ranges, model_object.volumes);
-        else
-        	layer_height_profile = layer_height_profile_from_ranges(slicing_parameters, model_object.layer_config_ranges);     // #ys_FIXME_experiment
+            //layer_height_profile = layer_height_profile_adaptive(slicing_parameters, model_object.layer_config_ranges, model_object.volumes);
+            layer_height_profile = layer_height_profile_from_ranges(slicing_parameters, model_object.layer_config_ranges);
        	updated = true;
     }
     return updated;
@@ -1870,12 +1932,13 @@ std::vector<ExPolygons> PrintObject::slice_modifiers(size_t region_id, const std
 			                	merge.assign(out.size(), false);
 			                } else {
 			                	for (size_t i = 0; i < out.size(); ++ i)
-			                		if (! this_slices[i].empty())
+                                    if (! this_slices[i].empty()) {
 			                			if (! out[i].empty()) {
 			                				append(out[i], this_slices[i]);
 			                				merge[i] = true;
 			                			} else
 			                				out[i] = std::move(this_slices[i]);
+                                    }
 			                }
 							i = j;
 						} else
@@ -2238,8 +2301,7 @@ void PrintObject::clip_fill_surfaces()
         // Detect things that we need to support.
         // Cummulative slices.
         Polygons slices;
-        for (const ExPolygon &expoly : layer->slices.expolygons)
-            polygons_append(slices, to_polygons(expoly));
+        polygons_append(slices, layer->slices.expolygons);
         // Cummulative fill surfaces.
         Polygons fill_surfaces;
         // Solid surfaces to be supported.
@@ -2348,7 +2410,7 @@ void PrintObject::discover_horizontal_shells()
                         polygons_append(solid, to_polygons(surface.expolygon));
                 if (solid.empty())
                     continue;
-//                Slic3r::debugf "Layer %d has %s surfaces\n", $i, ($type == S_TYPE_TOP) ? 'top' : 'bottom';
+//                Slic3r::debugf "Layer %d has %s surfaces\n", $i, ($type == stTop) ? 'top' : 'bottom';
                 
                 size_t solid_layers = (type == stTop) ? region_config.top_solid_layers.value : region_config.bottom_solid_layers.value;                
                 for (int n = (type == stTop) ? i-1 : i+1; std::abs(n - (int)i) < solid_layers; (type == stTop) ? -- n : ++ n) {
@@ -2367,7 +2429,7 @@ void PrintObject::discover_horizontal_shells()
                     // shells to be generated in the base but not in the walls (where there are many
                     // narrow bottom surfaces): reassigning $solid will consider the 'shadow' of the 
                     // upper perimeter as an obstacle and shell will not be propagated to more upper layers
-                    //FIXME How does it work for S_TYPE_INTERNALBRIDGE? This is set for sparse infill. Likely this does not work.
+                    //FIXME How does it work for stInternalBRIDGE? This is set for sparse infill. Likely this does not work.
                     Polygons new_internal_solid;
                     {
                         Polygons internal;
@@ -2560,7 +2622,7 @@ void PrintObject::combine_infill()
                 continue;
 //            Slic3r::debugf "  combining %d %s regions from layers %d-%d\n",
 //                scalar(@$intersection),
-//                ($type == S_TYPE_INTERNAL ? 'internal' : 'internal-solid'),
+//                ($type == stInternal ? 'internal' : 'internal-solid'),
 //                $layer_idx-($every-1), $layer_idx;
             // intersection now contains the regions that can be combined across the full amount of layers,
             // so let's remove those areas from all layers.

@@ -279,7 +279,7 @@ std::string PresetBundle::load_system_presets()
                 errors_cummulative += "\n";
             }
         }
-	if (first) {
+    if (first) {
 		// No config bundle loaded, reset.
 		this->reset(false);
 	}
@@ -366,7 +366,7 @@ void PresetBundle::load_selections(const AppConfig &config, const std::string &p
     this->filament_presets = { filaments.get_selected_preset_name() };
     for (unsigned int i = 1; i < 1000; ++ i) {
         char name[64];
-        sprintf(name, "filament_%d", i);
+        sprintf(name, "filament_%u", i);
         if (! config.has("presets", name))
             break;
         this->filament_presets.emplace_back(remove_ini_suffix(config.get("presets", name)));
@@ -388,11 +388,12 @@ void PresetBundle::export_selections(AppConfig &config)
     config.clear_section("presets");
     config.set("presets", "print",        prints.get_selected_preset_name());
     config.set("presets", "filament",     filament_presets.front());
-	for (int i = 1; i < filament_presets.size(); ++i) {
+    for (unsigned i = 1; i < filament_presets.size(); ++i) {
         char name[64];
-        sprintf(name, "filament_%d", i);
+        sprintf(name, "filament_%u", i);
         config.set("presets", name, filament_presets[i]);
     }
+
     config.set("presets", "sla_print",    sla_prints.get_selected_preset_name());
     config.set("presets", "sla_material", sla_materials.get_selected_preset_name());
     config.set("presets", "printer",      printers.get_selected_preset_name());
@@ -697,6 +698,7 @@ void PresetBundle::load_config_file_config(const std::string &name_or_path, bool
 		config.option<ConfigOptionString>("default_sla_print_profile", true);
 		config.option<ConfigOptionString>("default_sla_material_profile", true);
 		break;
+    default: break;
 	}
 
     // 1) Create a name from the file name.
@@ -778,7 +780,7 @@ void PresetBundle::load_config_file_config(const std::string &name_or_path, bool
                 Preset *loaded = nullptr;
                 if (is_external)
                     loaded = &this->filaments.load_external_preset(name_or_path, name,
-                        (i < old_filament_profile_names->values.size()) ? old_filament_profile_names->values[i] : "",
+                        (i < int(old_filament_profile_names->values.size())) ? old_filament_profile_names->values[i] : "",
                         std::move(cfg), i == 0);
                 else {
                     // Used by the config wizard when creating a custom setup.
@@ -805,6 +807,7 @@ void PresetBundle::load_config_file_config(const std::string &name_or_path, bool
         load_preset(this->sla_materials, 1, "sla_material_settings_id");
         load_preset(this->printers,      2, "printer_settings_id");
         break;
+    default: break;
     }
 
 	this->update_compatible(false);
@@ -1260,7 +1263,7 @@ void PresetBundle::update_multi_material_filament_presets()
 
     // Now verify if wiping_volumes_matrix has proper size (it is used to deduce number of extruders in wipe tower generator):
     std::vector<double> old_matrix = this->project_config.option<ConfigOptionFloats>("wiping_volumes_matrix")->values;
-    size_t old_number_of_extruders = int(sqrt(old_matrix.size())+EPSILON);
+    size_t old_number_of_extruders = size_t(sqrt(old_matrix.size())+EPSILON);
     if (num_extruders != old_number_of_extruders) {
             // First verify if purging volumes presets for each extruder matches number of extruders
             std::vector<double>& extruders = this->project_config.option<ConfigOptionFloats>("wiping_volumes_extruders")->values;
@@ -1349,6 +1352,7 @@ void PresetBundle::update_compatible(bool select_other_if_incompatible)
                 [&prefered_sla_material_profile](const std::string& profile_name){ return profile_name == prefered_sla_material_profile; });
 		break;
 	}
+    default: break;
     }
 }
 

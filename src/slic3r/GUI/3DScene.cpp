@@ -1142,7 +1142,7 @@ void GLVolumeCollection::export_toolpaths_to_obj(const char* filename) const
         Color color;
         ::memcpy((void*)color.data(), (const void*)volume->color, 4 * sizeof(float));
         fprintf(fp, "\n# material volume %d\n", volumes_count);
-        fprintf(fp, "usemtl material_%lld\n", 1 + std::distance(colors.begin(), colors.find(color)));
+        fprintf(fp, "usemtl material_%lld\n", (long long)(1 + std::distance(colors.begin(), colors.find(color))));
 
         int base_vertex_id = vertices_count + 1;
         int base_normal_id = normals_count + 1;
@@ -1242,8 +1242,8 @@ static void thick_lines_to_indexed_vertex_array(
         // calculate new XY normals
         Vec2d xy_right_normal = unscale(line.normal()).normalized();
 
-        int idx_a[4];
-        int idx_b[4];
+        int idx_a[4] = { 0, 0, 0, 0 }; // initialized to avoid warnings
+        int idx_b[4] = { 0, 0, 0, 0 }; // initialized to avoid warnings
         int idx_last = int(volume.vertices_and_normals_interleaved.size() / 6);
 
         bool bottom_z_different = bottom_z_prev != bottom_z;
@@ -1717,13 +1717,18 @@ static void thick_point_to_verts(const Vec3crd& point,
     point_to_indexed_vertex_array(point, width, height, volume.indexed_vertex_array);
 }
 
+void _3DScene::extrusionentity_to_verts(const Polyline &polyline, float width, float height, float print_z, GLVolume& volume)
+{
+	if (polyline.size() >= 2) {
+		size_t num_segments = polyline.size() - 1;
+		thick_lines_to_verts(polyline.lines(), std::vector<double>(num_segments, width), std::vector<double>(num_segments, height), false, print_z, volume);
+	}
+}
+
 // Fill in the qverts and tverts with quads and triangles for the extrusion_path.
 void _3DScene::extrusionentity_to_verts(const ExtrusionPath &extrusion_path, float print_z, GLVolume &volume)
 {
-    Lines               lines = extrusion_path.polyline.lines();
-    std::vector<double> widths(lines.size(), extrusion_path.width);
-    std::vector<double> heights(lines.size(), extrusion_path.height);
-    thick_lines_to_verts(lines, widths, heights, false, print_z, volume);
+	extrusionentity_to_verts(extrusion_path.polyline, extrusion_path.width, extrusion_path.height, print_z, volume);
 }
 
 // Fill in the qverts and tverts with quads and triangles for the extrusion_path.

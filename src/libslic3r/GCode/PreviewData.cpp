@@ -23,7 +23,7 @@ std::vector<unsigned char> GCodePreviewData::Color::as_bytes() const
     return ret;
 }
 
-GCodePreviewData::Extrusion::Layer::Layer(float z, const ExtrusionPaths& paths)
+GCodePreviewData::Extrusion::Layer::Layer(float z, const Paths& paths)
     : z(z)
     , paths(paths)
 {
@@ -121,7 +121,7 @@ GCodePreviewData::LegendItem::LegendItem(const std::string& text, const GCodePre
 {
 }
 
-const GCodePreviewData::Color GCodePreviewData::Extrusion::Default_Extrusion_Role_Colors[Num_Extrusion_Roles] =
+const GCodePreviewData::Color GCodePreviewData::Extrusion::Default_Extrusion_Role_Colors[erCount] =
 {
     Color(0.0f, 0.0f, 0.0f, 1.0f),   // erNone
     Color(1.0f, 0.0f, 0.0f, 1.0f),   // erPerimeter
@@ -140,44 +140,20 @@ const GCodePreviewData::Color GCodePreviewData::Extrusion::Default_Extrusion_Rol
     Color(0.0f, 0.0f, 0.0f, 1.0f)    // erMixed
 };
 
-// todo: merge with Slic3r::ExtrusionRole2String() from GCode.cpp
-const std::string GCodePreviewData::Extrusion::Default_Extrusion_Role_Names[Num_Extrusion_Roles]
-{
-    L("None"),
-    L("Perimeter"),
-    L("External perimeter"),
-    L("Overhang perimeter"),
-    L("Internal infill"),
-    L("Solid infill"),
-    L("Top solid infill"),
-    L("Bridge infill"),
-    L("Gap fill"),
-    L("Skirt"),
-    L("Support material"),
-    L("Support material interface"),
-    L("Wipe tower"),
-    L("Custom"),
-    L("Mixed")
-};
-
 const GCodePreviewData::Extrusion::EViewType GCodePreviewData::Extrusion::Default_View_Type = GCodePreviewData::Extrusion::FeatureType;
 
 void GCodePreviewData::Extrusion::set_default()
 {
     view_type = Default_View_Type;
 
-    ::memcpy((void*)role_colors, (const void*)Default_Extrusion_Role_Colors, Num_Extrusion_Roles * sizeof(Color));
+    ::memcpy((void*)role_colors, (const void*)Default_Extrusion_Role_Colors, erCount * sizeof(Color));
 
-    for (unsigned int i = 0; i < Num_Extrusion_Roles; ++i)
-    {
-        role_names[i] = Default_Extrusion_Role_Names[i];
-    }
+    for (unsigned int i = 0; i < erCount; ++i)
+        role_names[i] = ExtrusionEntity::role_to_string(ExtrusionRole(i));
 
     role_flags = 0;
-    for (unsigned int i = 0; i < Num_Extrusion_Roles; ++i)
-    {
+    for (unsigned int i = 0; i < erCount; ++i)
         role_flags |= 1 << i;
-    }
 }
 
 bool GCodePreviewData::Extrusion::is_role_flag_set(ExtrusionRole role) const
@@ -195,8 +171,8 @@ size_t GCodePreviewData::Extrusion::memory_used() const
     size_t out = sizeof(*this);
     out += SLIC3R_STDVEC_MEMSIZE(this->layers, Layer);
     for (const Layer &layer : this->layers) {
-        out += SLIC3R_STDVEC_MEMSIZE(layer.paths, ExtrusionPath);
-        for (const ExtrusionPath &path : layer.paths)
+        out += SLIC3R_STDVEC_MEMSIZE(layer.paths, Path);
+        for (const Path &path : layer.paths)
 			out += SLIC3R_STDVEC_MEMSIZE(path.polyline.points, Point);
     }
 	return out;
@@ -265,6 +241,7 @@ void GCodePreviewData::set_default()
     ::memcpy((void*)ranges.height.colors, (const void*)Range::Default_Colors, Range::Colors_Count * sizeof(Color));
     ::memcpy((void*)ranges.width.colors, (const void*)Range::Default_Colors, Range::Colors_Count * sizeof(Color));
     ::memcpy((void*)ranges.feedrate.colors, (const void*)Range::Default_Colors, Range::Colors_Count * sizeof(Color));
+    ::memcpy((void*)ranges.fan_speed.colors, (const void*)Range::Default_Colors, Range::Colors_Count * sizeof(Color));
     ::memcpy((void*)ranges.volumetric_rate.colors, (const void*)Range::Default_Colors, Range::Colors_Count * sizeof(Color));
 
     extrusion.set_default();
@@ -311,6 +288,11 @@ GCodePreviewData::Color GCodePreviewData::get_feedrate_color(float feedrate) con
     return ranges.feedrate.get_color_at(feedrate);
 }
 
+GCodePreviewData::Color GCodePreviewData::get_fan_speed_color(float fan_speed) const
+{
+    return ranges.fan_speed.get_color_at(fan_speed);
+}
+
 GCodePreviewData::Color GCodePreviewData::get_volumetric_rate_color(float rate) const
 {
     return ranges.volumetric_rate.get_color_at(rate);
@@ -318,7 +300,7 @@ GCodePreviewData::Color GCodePreviewData::get_volumetric_rate_color(float rate) 
 
 void GCodePreviewData::set_extrusion_role_color(const std::string& role_name, float red, float green, float blue, float alpha)
 {
-    for (unsigned int i = 0; i < Extrusion::Num_Extrusion_Roles; ++i)
+    for (unsigned int i = 0; i < erCount; ++i)
     {
         if (role_name == extrusion.role_names[i])
         {
@@ -382,8 +364,10 @@ std::string GCodePreviewData::get_legend_title() const
         return L("Width (mm)");
     case Extrusion::Feedrate:
         return L("Speed (mm/s)");
+    case Extrusion::FanSpeed:
+        return L("Fan Speed (%)");
     case Extrusion::VolumetricRate:
-        return L("Volumetric flow rate (mm3/s)");
+        return L("Volumetric flow rate (mm³/s)");
     case Extrusion::Tool:
         return L("Tool");
     case Extrusion::ColorPrint:
@@ -443,6 +427,11 @@ GCodePreviewData::LegendItemsList GCodePreviewData::get_legend_items(const std::
     case Extrusion::Feedrate:
         {
             Helper::FillListFromRange(items, ranges.feedrate, 1, 1.0f);
+            break;
+        }
+    case Extrusion::FanSpeed:
+        {
+            Helper::FillListFromRange(items, ranges.fan_speed, 0, 1.0f);
             break;
         }
     case Extrusion::VolumetricRate:

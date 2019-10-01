@@ -446,7 +446,7 @@ void BedShapePanel::update_shape()
 		auto twopi = 2 * PI;
         auto edges = 72;
         std::vector<Vec2d> points;
-        for (size_t i = 1; i <= edges; ++i) {
+        for (int i = 1; i <= edges; ++i) {
             auto angle = i * twopi / edges;
 			points.push_back(Vec2d(r*cos(angle), r*sin(angle)));
 		}
@@ -455,7 +455,7 @@ void BedShapePanel::update_shape()
     else if (page_idx == SHAPE_CUSTOM) 
         m_shape = m_loaded_shape;
 
-	update_preview();
+    update_preview();
 }
 
 // Loads an stl file, projects it to the XY plane and calculates a polygon.

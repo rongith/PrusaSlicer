@@ -39,6 +39,8 @@ class PrintRegion
 public:
     const Print*                print() const { return m_print; }
     const PrintRegionConfig&    config() const { return m_config; }
+	// 1-based extruder identifier for this region and role.
+	unsigned int 				extruder(FlowRole role) const;
     Flow                        flow(FlowRole role, double layer_height, bool bridge, bool first_layer, double width, const PrintObject &object) const;
     // Average diameter of nozzles participating on extruding this region.
     coordf_t                    nozzle_dmr_avg(const PrintConfig &print_config) const;
@@ -94,6 +96,7 @@ public:
     const SupportLayerPtrs& support_layers() const  { return m_support_layers; }
     const Transform3d&      trafo() const           { return m_trafo; }
     const Points&           copies() const          { return m_copies; }
+    const Point 			copy_center(size_t idx) const { return m_copies[idx] + m_copies_shift + Point(this->size.x() / 2, this->size.y() / 2); }
 
     // since the object is aligned to origin, bounding box coincides with size
     BoundingBox bounding_box() const { return BoundingBox(Point(0,0), to_2d(this->size)); }

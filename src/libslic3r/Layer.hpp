@@ -6,8 +6,6 @@
 #include "SurfaceCollection.hpp"
 #include "ExtrusionEntityCollection.hpp"
 #include "ExPolygonCollection.hpp"
-#include "PolylineCollection.hpp"
-
 
 namespace Slic3r {
 
@@ -48,7 +46,7 @@ public:
     Polygons                    bridged;
 
     // collection of polylines representing the unsupported bridge edges
-    PolylineCollection          unsupported_bridge_edges;
+    Polylines          			unsupported_bridge_edges;
 
     // ordered collection of extrusion paths/loops to build all perimeters
     // (this collection contains only ExtrusionEntityCollection objects)
@@ -62,7 +60,7 @@ public:
     void    slices_to_fill_surfaces_clipped();
     void    prepare_fill_surfaces();
     void    make_perimeters(const SurfaceCollection &slices, SurfaceCollection* fill_surfaces);
-    void    process_external_surfaces(const Layer* lower_layer);
+    void    process_external_surfaces(const Layer *lower_layer, const Polygons *lower_layer_covered);
     double  infill_area_threshold() const;
     // Trim surfaces by trimming polygons. Used by the elephant foot compensation at the 1st layer.
     void    trim_surfaces(const Polygons &trimming_polygons);
