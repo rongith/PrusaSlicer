@@ -726,8 +726,16 @@ std::string CoolingBuffer::apply_layer_cooldown(
     for (const CoolingLine *line : lines) {
         const char *line_start  = gcode.c_str() + line->line_start;
         const char *line_end    = gcode.c_str() + line->line_end;
-        bool external_perimeter_changed = in_external_perimeter != bool(line->type & CoolingLine::TYPE_EXTERNAL_PERIMETER);
-        in_external_perimeter = bool(line->type & CoolingLine::TYPE_EXTERNAL_PERIMETER);
+
+        // Adjust the fan speed for external perimeters only when the setting is enabled and we would need to adjust the speed.
+        bool adjust_fan_speed_on_external_perimeter = !!external_perimeter_fan_speed && fan_speed != external_perimeter_fan_speed;
+
+        if (adjust_fan_speed_on_external_perimeter) {
+            bool prev_in_external_perimeter = in_external_perimeter;
+            in_external_perimeter = line->type & CoolingLine::TYPE_EXTERNAL_PERIMETER;
+            // If these are not equal it means need to toggle the external perimeter fan speed.
+            adjust_fan_speed_on_external_perimeter = in_external_perimeter != prev_in_external_perimeter;
+        }
 
         if (line_start > pos)
             new_gcode.append(pos, line_start - pos);
@@ -745,10 +753,10 @@ std::string CoolingBuffer::apply_layer_cooldown(
             if (bridge_fan_control)
                 new_gcode += m_gcodegen.writer().set_fan(fan_speed, true);
         } else if (line->type & CoolingLine::TYPE_EXTRUDE_END) {
-            if (external_perimeter_fan_speed && external_perimeter_changed && !in_external_perimeter && fan_speed != external_perimeter_fan_speed)
+            if (adjust_fan_speed_on_external_perimeter)
                 new_gcode += m_gcodegen.writer().set_fan(fan_speed, true);
         } else if (line->type & (CoolingLine::TYPE_ADJUSTABLE | CoolingLine::TYPE_EXTERNAL_PERIMETER | CoolingLine::TYPE_WIPE | CoolingLine::TYPE_HAS_F)) {
-            if (external_perimeter_fan_speed && external_perimeter_changed && in_external_perimeter && fan_speed != external_perimeter_fan_speed)
+            if (adjust_fan_speed_on_external_perimeter)
                 new_gcode += m_gcodegen.writer().set_fan(external_perimeter_fan_speed, true);
 
             // Find the start of a comment, or roll to the end of line.
