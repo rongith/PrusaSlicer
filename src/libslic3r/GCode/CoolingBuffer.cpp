@@ -733,7 +733,6 @@ std::string CoolingBuffer::apply_layer_cooldown(
         if (adjust_fan_speed_on_external_perimeter) {
             bool prev_in_external_perimeter = in_external_perimeter;
             in_external_perimeter = line->type & CoolingLine::TYPE_EXTERNAL_PERIMETER;
-            // If these are not equal it means need to toggle the external perimeter fan speed.
             adjust_fan_speed_on_external_perimeter = in_external_perimeter != prev_in_external_perimeter;
         }
 
