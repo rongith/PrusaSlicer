@@ -29,6 +29,9 @@ const std::string GCodeAnalyzer::Mm3_Per_Mm_Tag = "_ANALYZER_MM3_PER_MM:";
 const std::string GCodeAnalyzer::Width_Tag = "_ANALYZER_WIDTH:";
 const std::string GCodeAnalyzer::Height_Tag = "_ANALYZER_HEIGHT:";
 const std::string GCodeAnalyzer::Color_Change_Tag = "_ANALYZER_COLOR_CHANGE";
+const std::string GCodeAnalyzer::Pause_Print_Tag = "_ANALYZER_PAUSE_PRINT";
+const std::string GCodeAnalyzer::Custom_Code_Tag = "_ANALYZER_CUSTOM_CODE";
+const std::string GCodeAnalyzer::End_Pause_Print_Or_Custom_Code_Tag = "_ANALYZER_END_PAUSE_PRINT_OR_CUSTOM_CODE";
 
 const double GCodeAnalyzer::Default_mm3_per_mm = 0.0;
 const float GCodeAnalyzer::Default_Width = 0.0f;
@@ -105,24 +108,11 @@ GCodeAnalyzer::GCodeMove::GCodeMove(GCodeMove::EType type, const GCodeAnalyzer::
 {
 }
 
-GCodeAnalyzer::GCodeAnalyzer()
-{
-    reset();
-}
-
-void GCodeAnalyzer::set_extruder_offsets(const GCodeAnalyzer::ExtruderOffsetsMap& extruder_offsets)
-{
-    m_extruder_offsets = extruder_offsets;
-}
-
 void GCodeAnalyzer::set_extruders_count(unsigned int count)
 {
     m_extruders_count = count;
-}
-
-void GCodeAnalyzer::set_gcode_flavor(const GCodeFlavor& flavor)
-{
-    m_gcode_flavor = flavor;
+    for (unsigned int i=0; i<m_extruders_count; i++)
+        m_extruder_color[i] = i;
 }
 
 void GCodeAnalyzer::reset()
@@ -141,11 +131,13 @@ void GCodeAnalyzer::reset()
     _set_start_extrusion(DEFAULT_START_EXTRUSION);
     _set_fan_speed(DEFAULT_FAN_SPEED);
     _reset_axes_position();
+    _reset_axes_origin();
     _reset_cached_position();
 
     m_moves_map.clear();
     m_extruder_offsets.clear();
     m_extruders_count = 1;
+    m_extruder_color.clear();
 }
 
 const std::string& GCodeAnalyzer::process_gcode(const std::string& gcode)
@@ -284,6 +276,11 @@ void GCodeAnalyzer::_process_gcode_line(GCodeReader&, const GCodeReader::GCodeLi
                         _processM108orM135(line);
                         break;
                     }
+                case 132: // Recall stored home offsets
+                    {
+                        _processM132(line);
+                        break;
+                    }
                 case 401: // Repetier: Store x, y and z position
                     {
                         _processM401(line);
@@ -310,31 +307,32 @@ void GCodeAnalyzer::_process_gcode_line(GCodeReader&, const GCodeReader::GCodeLi
     m_process_output += line.raw() + "\n";
 }
 
-// Returns the new absolute position on the given axis in dependence of the given parameters
-float axis_absolute_position_from_G1_line(GCodeAnalyzer::EAxis axis, const GCodeReader::GCodeLine& lineG1, GCodeAnalyzer::EUnits units, bool is_relative, float current_absolute_position)
-{
-    float lengthsScaleFactor = (units == GCodeAnalyzer::Inches) ? INCHES_TO_MM : 1.0f;
-    if (lineG1.has(Slic3r::Axis(axis)))
-    {
-        float ret = lineG1.value(Slic3r::Axis(axis)) * lengthsScaleFactor;
-        return is_relative ? current_absolute_position + ret : ret;
-    }
-    else
-        return current_absolute_position;
-}
-
 void GCodeAnalyzer::_processG1(const GCodeReader::GCodeLine& line)
 {
+    auto axis_absolute_position = [this](GCodeAnalyzer::EAxis axis, const GCodeReader::GCodeLine& lineG1) -> float
+    {
+        float current_absolute_position = _get_axis_position(axis);
+        float current_origin = _get_axis_origin(axis);
+        float lengthsScaleFactor = (_get_units() == GCodeAnalyzer::Inches) ? INCHES_TO_MM : 1.0f;
+
+        bool is_relative = (_get_global_positioning_type() == Relative);
+        if (axis == E)
+            is_relative |= (_get_e_local_positioning_type() == Relative);
+
+        if (lineG1.has(Slic3r::Axis(axis)))
+        {
+            float ret = lineG1.value(Slic3r::Axis(axis)) * lengthsScaleFactor;
+            return is_relative ? current_absolute_position + ret : ret + current_origin;
+        }
+        else
+            return current_absolute_position;
+    };
+
     // updates axes positions from line
-    EUnits units = _get_units();
     float new_pos[Num_Axis];
     for (unsigned char a = X; a < Num_Axis; ++a)
     {
-        bool is_relative = (_get_global_positioning_type() == Relative);
-        if (a == E)
-            is_relative |= (_get_e_local_positioning_type() == Relative);
-
-        new_pos[a] = axis_absolute_position_from_G1_line((EAxis)a, line, units, is_relative, _get_axis_position((EAxis)a));
+        new_pos[a] = axis_absolute_position((EAxis)a, line);
     }
 
     // updates feedrate from line, if present
@@ -424,25 +422,25 @@ void GCodeAnalyzer::_processG92(const GCodeReader::GCodeLine& line)
 
     if (line.has_x())
     {
-        _set_axis_position(X, line.x() * lengthsScaleFactor);
+        _set_axis_origin(X, _get_axis_position(X) - line.x() * lengthsScaleFactor);
         anyFound = true;
     }
 
     if (line.has_y())
     {
-        _set_axis_position(Y, line.y() * lengthsScaleFactor);
+        _set_axis_origin(Y, _get_axis_position(Y) - line.y() * lengthsScaleFactor);
         anyFound = true;
     }
 
     if (line.has_z())
     {
-        _set_axis_position(Z, line.z() * lengthsScaleFactor);
+        _set_axis_origin(Z, _get_axis_position(Z) - line.z() * lengthsScaleFactor);
         anyFound = true;
     }
 
     if (line.has_e())
     {
-        _set_axis_position(E, line.e() * lengthsScaleFactor);
+        _set_axis_origin(E, _get_axis_position(E) - line.e() * lengthsScaleFactor);
         anyFound = true;
     }
 
@@ -450,7 +448,7 @@ void GCodeAnalyzer::_processG92(const GCodeReader::GCodeLine& line)
     {
         for (unsigned char a = X; a < Num_Axis; ++a)
         {
-            _set_axis_position((EAxis)a, 0.0f);
+            _set_axis_origin((EAxis)a, _get_axis_position((EAxis)a));
         }
     }
 }
@@ -500,6 +498,25 @@ void GCodeAnalyzer::_processM108orM135(const GCodeReader::GCodeLine& line)
             _processT(cmd);
         }
     }
+}
+
+void GCodeAnalyzer::_processM132(const GCodeReader::GCodeLine& line)
+{
+    // This command is used by Makerbot to load the current home position from EEPROM
+    // see: https://github.com/makerbot/s3g/blob/master/doc/GCodeProtocol.md
+    // Using this command to reset the axis origin to zero helps in fixing: https://github.com/prusa3d/PrusaSlicer/issues/3082
+
+    if (line.has_x())
+        _set_axis_origin(X, 0.0f);
+
+    if (line.has_y())
+        _set_axis_origin(Y, 0.0f);
+
+    if (line.has_z())
+        _set_axis_origin(Z, 0.0f);
+
+    if (line.has_e())
+        _set_axis_origin(E, 0.0f);
 }
 
 void GCodeAnalyzer::_processM401(const GCodeReader::GCodeLine& line)
@@ -569,7 +586,11 @@ void GCodeAnalyzer::_processT(const std::string& cmd)
                     BOOST_LOG_TRIVIAL(error) << "GCodeAnalyzer encountered an invalid toolchange, maybe from a custom gcode.";
             }
             else
+            {
                 _set_extruder_id(id);
+                if (_get_cp_color_id() != INT_MAX)
+                    _set_cp_color_id(m_extruder_color[id]);
+            }
 
             // stores tool change move
             _store_move(GCodeMove::Tool_change);
@@ -622,7 +643,33 @@ bool GCodeAnalyzer::_process_tags(const GCodeReader::GCodeLine& line)
     pos = comment.find(Color_Change_Tag);
     if (pos != comment.npos)
     {
-        _process_color_change_tag();
+        pos = comment.find_last_of(",T");
+        int extruder = pos == comment.npos ? 0 : std::atoi(comment.substr(pos + 1, comment.npos).c_str());
+        _process_color_change_tag(extruder);
+        return true;
+    }
+
+    // color change tag
+    pos = comment.find(Pause_Print_Tag);
+    if (pos != comment.npos)
+    {
+        _process_pause_print_or_custom_code_tag();
+        return true;
+    }
+
+    // color change tag
+    pos = comment.find(Custom_Code_Tag);
+    if (pos != comment.npos)
+    {
+        _process_pause_print_or_custom_code_tag();
+        return true;
+    }
+
+    // color change tag
+    pos = comment.find(End_Pause_Print_Or_Custom_Code_Tag);
+    if (pos != comment.npos)
+    {
+        _process_end_pause_print_or_custom_code_tag();
         return true;
     }
 
@@ -655,10 +702,24 @@ void GCodeAnalyzer::_process_height_tag(const std::string& comment, size_t pos)
     _set_height((float)::strtod(comment.substr(pos + Height_Tag.length()).c_str(), nullptr));
 }
 
-void GCodeAnalyzer::_process_color_change_tag()
+void GCodeAnalyzer::_process_color_change_tag(int extruder)
 {
-    m_state.cur_cp_color_id++;
-    _set_cp_color_id(m_state.cur_cp_color_id);
+    m_extruder_color[extruder] = m_extruders_count + m_state.cp_color_counter; // color_change position in list of color for preview
+    m_state.cp_color_counter++;
+
+    if (_get_extruder_id() == extruder)
+        _set_cp_color_id(m_extruder_color[extruder]);
+}
+
+void GCodeAnalyzer::_process_pause_print_or_custom_code_tag()
+{
+    _set_cp_color_id(INT_MAX);
+}
+
+void GCodeAnalyzer::_process_end_pause_print_or_custom_code_tag()
+{
+    if (_get_cp_color_id() == INT_MAX)
+        _set_cp_color_id(m_extruder_color[_get_extruder_id()]);
 }
 
 void GCodeAnalyzer::_set_units(GCodeAnalyzer::EUnits units)
@@ -781,9 +842,24 @@ float GCodeAnalyzer::_get_axis_position(EAxis axis) const
     return m_state.position[axis];
 }
 
+void GCodeAnalyzer::_set_axis_origin(EAxis axis, float position)
+{
+    m_state.origin[axis] = position;
+}
+
+float GCodeAnalyzer::_get_axis_origin(EAxis axis) const
+{
+    return m_state.origin[axis];
+}
+
 void GCodeAnalyzer::_reset_axes_position()
 {
     ::memset((void*)m_state.position, 0, Num_Axis * sizeof(float));
+}
+
+void GCodeAnalyzer::_reset_axes_origin()
+{
+    ::memset((void*)m_state.origin, 0, Num_Axis * sizeof(float));
 }
 
 void GCodeAnalyzer::_set_start_position(const Vec3d& position)

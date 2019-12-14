@@ -227,9 +227,9 @@ void Tab::create_preset_tab()
     m_treectrl->Bind(wxEVT_KEY_DOWN, &Tab::OnKeyDown, this);
 
     m_presets_choice->Bind(wxEVT_COMBOBOX, ([this](wxCommandEvent e) {
-        //! Because of The MSW and GTK version of wxBitmapComboBox derived from wxComboBox,
+        //! Because of The MSW and GTK version of wxBitmapComboBox derived from wxComboBox, 
         //! but the OSX version derived from wxOwnerDrawnCombo, instead of:
-        //! select_preset(m_presets_choice->GetStringSelection().ToUTF8().data());
+        //! select_preset(m_presets_choice->GetStringSelection().ToUTF8().data()); 
         //! we doing next:
         int selected_item = m_presets_choice->GetSelection();
         if (m_selected_preset_item == size_t(selected_item) && !m_presets->current_is_dirty())
@@ -241,7 +241,7 @@ void Tab::create_preset_tab()
                 selected_string == "-------  User presets  -------"*/) {
                 m_presets_choice->SetSelection(m_selected_preset_item);
                 if (wxString::FromUTF8(selected_string.c_str()) == PresetCollection::separator(L("Add a new printer")))
-                    wxTheApp->CallAfter([]() { Slic3r::GUI::config_wizard(Slic3r::GUI::ConfigWizard::RR_USER); });
+                    wxTheApp->CallAfter([]() { wxGetApp().run_wizard(ConfigWizard::RR_USER); });
                 return;
             }
             m_selected_preset_item = selected_item;
@@ -998,6 +998,11 @@ void Tab::update_preset_description_line()
             default: break;
             }
         }
+        else
+        {
+            description_line += "\n\n\t" + _(L("full profile name")) + ": \n\t\t" + parent->name;
+            description_line += "\n\t" + _(L("symbolic profile name")) + ": \n\t\t" + parent->alias;
+        }
     }
 
     m_parent_preset_description_line->SetText(description_line, false);
@@ -1170,6 +1175,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("wipe_tower_width");
         optgroup->append_single_option_line("wipe_tower_rotation_angle");
         optgroup->append_single_option_line("wipe_tower_bridging");
+        optgroup->append_single_option_line("wipe_tower_no_sparse_layers");
         optgroup->append_single_option_line("single_extruder_multi_material_priming");
 
         optgroup = page->new_optgroup(_(L("Advanced")));
@@ -1809,7 +1815,10 @@ void TabPrinter::build_fff()
         optgroup->append_single_option_line("single_extruder_multi_material");
 
         optgroup->m_on_change = [this, optgroup](t_config_option_key opt_key, boost::any value) {
-            size_t extruders_count = boost::any_cast<size_t>(optgroup->get_value("extruders_count"));
+            // optgroup->get_value() return int for def.type == coInt,
+            // Thus, there should be boost::any_cast<int> !
+            // Otherwise, boost::any_cast<size_t> causes an "unhandled unknown exception"
+            size_t extruders_count = size_t(boost::any_cast<int>(optgroup->get_value("extruders_count")));
             wxTheApp->CallAfter([this, opt_key, value, extruders_count]() {
                 if (opt_key == "extruders_count" || opt_key == "single_extruder_multi_material") {
                     extruders_count_changed(extruders_count);
@@ -2747,7 +2756,7 @@ void Tab::select_preset(std::string preset_name, bool delete_current)
         PrinterTechnology  printer_technology = m_preset_bundle->printers.get_edited_preset().printer_technology();
         PresetCollection  &dependent = (printer_technology == ptFFF) ? m_preset_bundle->filaments : m_preset_bundle->sla_materials;
         bool 			   old_preset_dirty = dependent.current_is_dirty();
-        bool 			   new_preset_compatible = dependent.get_edited_preset().is_compatible_with_print(*m_presets->find_preset(preset_name, true));
+        bool 			   new_preset_compatible = is_compatible_with_print(dependent.get_edited_preset_with_vendor_profile(), m_presets->get_preset_with_vendor_profile(*m_presets->find_preset(preset_name, true)));
         if (! canceled)
             canceled = old_preset_dirty && ! new_preset_compatible && ! may_discard_current_dirty_preset(&dependent, preset_name);
         if (! canceled) {
@@ -2765,6 +2774,7 @@ void Tab::select_preset(std::string preset_name, bool delete_current)
         // With the introduction of the SLA printer types, we need to support switching between
         // the FFF and SLA printers.
         const Preset 		&new_printer_preset     = *m_presets->find_preset(preset_name, true);
+		const PresetWithVendorProfile new_printer_preset_with_vendor_profile = m_presets->get_preset_with_vendor_profile(new_printer_preset);
         PrinterTechnology    old_printer_technology = m_presets->get_edited_preset().printer_technology();
         PrinterTechnology    new_printer_technology = new_printer_preset.printer_technology();
         if (new_printer_technology == ptSLA && old_printer_technology == ptFFF && !may_switch_to_SLA_preset())
@@ -2785,7 +2795,7 @@ void Tab::select_preset(std::string preset_name, bool delete_current)
             };
             for (PresetUpdate &pu : updates) {
                 pu.old_preset_dirty = (old_printer_technology == pu.technology) && pu.presets->current_is_dirty();
-                pu.new_preset_compatible = (new_printer_technology == pu.technology) && pu.presets->get_edited_preset().is_compatible_with_printer(new_printer_preset);
+                pu.new_preset_compatible = (new_printer_technology == pu.technology) && is_compatible_with_printer(pu.presets->get_edited_preset_with_vendor_profile(), new_printer_preset_with_vendor_profile);
                 if (!canceled)
                     canceled = pu.old_preset_dirty && !pu.new_preset_compatible && !may_discard_current_dirty_preset(pu.presets, preset_name);
             }
@@ -2921,7 +2931,13 @@ void Tab::OnTreeSelChange(wxTreeEvent& event)
 #ifdef __linux__
     std::unique_ptr<wxWindowUpdateLocker> no_updates(new wxWindowUpdateLocker(this));
 #else
-//	wxWindowUpdateLocker noUpdates(this);
+    /* On Windows we use DoubleBuffering during rendering,
+     * so on Window is no needed to call a Freeze/Thaw functions.
+     * But under OSX (builds compiled with MacOSX10.14.sdk) wxStaticBitmap rendering is broken without Freeze/Thaw call.
+     */
+#ifdef __WXOSX__
+	wxWindowUpdateLocker noUpdates(this);
+#endif
 #endif
 
     if (m_pages.empty())
@@ -2982,7 +2998,8 @@ void Tab::save_preset(std::string name /*= ""*/)
     if (name.empty()) {
         const Preset &preset = m_presets->get_selected_preset();
         auto default_name = preset.is_default ? "Untitled" :
-                            preset.is_system ? (boost::format(_utf8(L("%1% - Copy"))) % preset.name).str() :
+//                            preset.is_system ? (boost::format(_utf8(L("%1% - Copy"))) % preset.name).str() :
+                            preset.is_system ? (boost::format(_CTX_utf8(L_CONTEXT("%1% - Copy", "PresetName"), "PresetName")) % preset.name).str() :
                             preset.name;
 
         bool have_extention = boost::iends_with(default_name, ".ini");
@@ -3016,6 +3033,18 @@ void Tab::save_preset(std::string name /*= ""*/)
         if (existing && (existing->is_external)) {
             show_error(this, _(L("Cannot overwrite an external profile.")));
             return;
+        }
+        if (existing/* && name != preset.name*/)
+        {
+            wxString msg_text = GUI::from_u8((boost::format(_utf8(L("Preset with name \"%1%\" already exist."))) % name).str());
+            msg_text += "\n" + _(L("Replace?"));
+            wxMessageDialog dialog(nullptr, msg_text, _(L("Warning")), wxICON_WARNING | wxYES | wxNO);
+
+            if (dialog.ShowModal() == wxID_NO)
+                return;
+
+            // Remove the preset from the list.
+            m_presets->delete_preset(name);
         }
     }
 
@@ -3405,8 +3434,41 @@ void TabSLAMaterial::build()
 
     auto page = add_options_page(_(L("Material")), "resin");
 
-    auto optgroup = page->new_optgroup(_(L("Layers")));
-//     optgroup->append_single_option_line("layer_height");
+    auto optgroup = page->new_optgroup(_(L("Material")));
+    optgroup->append_single_option_line("bottle_cost");
+    optgroup->append_single_option_line("bottle_volume");
+    optgroup->append_single_option_line("bottle_weight");
+    optgroup->append_single_option_line("material_density");
+
+    optgroup->m_on_change = [this, optgroup](t_config_option_key opt_key, boost::any value)
+    {
+        DynamicPrintConfig new_conf = *m_config;
+
+        if (opt_key == "bottle_volume") {
+            double new_bottle_weight =  boost::any_cast<double>(value)/(new_conf.option("material_density")->getFloat() * 1000);
+            new_conf.set_key_value("bottle_weight", new ConfigOptionFloat(new_bottle_weight));
+        }
+        if (opt_key == "bottle_weight") {
+            double new_bottle_volume =  boost::any_cast<double>(value)*(new_conf.option("material_density")->getFloat() * 1000);
+            new_conf.set_key_value("bottle_volume", new ConfigOptionFloat(new_bottle_volume));
+        }
+        if (opt_key == "material_density") {
+            double new_bottle_volume = new_conf.option("bottle_weight")->getFloat() * boost::any_cast<double>(value) * 1000;
+            new_conf.set_key_value("bottle_volume", new ConfigOptionFloat(new_bottle_volume));
+        }
+
+        load_config(new_conf);
+
+        update_dirty();
+        on_value_change(opt_key, value);
+
+        if (opt_key == "bottle_volume" || opt_key == "bottle_cost") {
+            wxGetApp().sidebar().update_sliced_info_sizer();
+            wxGetApp().sidebar().Layout();
+        }
+    };
+
+    optgroup = page->new_optgroup(_(L("Layers")));
     optgroup->append_single_option_line("initial_layer_height");
 
     optgroup = page->new_optgroup(_(L("Exposure")));
@@ -3537,12 +3599,14 @@ void TabSLAPrint::build()
     optgroup->append_single_option_line("pad_enable");
     optgroup->append_single_option_line("pad_wall_thickness");
     optgroup->append_single_option_line("pad_wall_height");
+    optgroup->append_single_option_line("pad_brim_size");
     optgroup->append_single_option_line("pad_max_merge_distance");
     // TODO: Disabling this parameter for the beta release
 //    optgroup->append_single_option_line("pad_edge_radius");
     optgroup->append_single_option_line("pad_wall_slope");
 
     optgroup->append_single_option_line("pad_around_object");
+    optgroup->append_single_option_line("pad_around_object_everywhere");
     optgroup->append_single_option_line("pad_object_gap");
     optgroup->append_single_option_line("pad_object_connector_stride");
     optgroup->append_single_option_line("pad_object_connector_width");

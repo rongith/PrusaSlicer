@@ -17,6 +17,9 @@
 #include "GCodeTimeEstimator.hpp"
 #include "EdgeGrid.hpp"
 #include "GCode/Analyzer.hpp"
+#if ENABLE_THUMBNAIL_GENERATOR
+#include "GCode/ThumbnailData.hpp"
+#endif // ENABLE_THUMBNAIL_GENERATOR
 
 #include <memory>
 #include <string>
@@ -110,7 +113,7 @@ public:
 
 private:
     WipeTowerIntegration& operator=(const WipeTowerIntegration&);
-    std::string append_tcr(GCode &gcodegen, const WipeTower::ToolChangeResult &tcr, int new_extruder_id) const;
+    std::string append_tcr(GCode &gcodegen, const WipeTower::ToolChangeResult &tcr, int new_extruder_id, double z = -1.) const;
 
     // Postprocesses gcode: rotates and moves G1 extrusions and returns result
     std::string post_process_wipe_tower_moves(const WipeTower::ToolChangeResult& tcr, const Vec2f& translation, float angle) const;
@@ -131,6 +134,7 @@ private:
     int                                                          m_tool_change_idx;
     bool                                                         m_brim_done;
     bool                                                         i_have_brim = false;
+    double                                                       m_last_wipe_tower_print_z = 0.f;
 };
 
 class GCode {
@@ -162,7 +166,11 @@ public:
 
     // throws std::runtime_exception on error,
     // throws CanceledException through print->throw_if_canceled().
+#if ENABLE_THUMBNAIL_GENERATOR
+    void            do_export(Print* print, const char* path, GCodePreviewData* preview_data = nullptr, ThumbnailsGeneratorCallback thumbnail_cb = nullptr);
+#else
     void            do_export(Print *print, const char *path, GCodePreviewData *preview_data = nullptr);
+#endif // ENABLE_THUMBNAIL_GENERATOR
 
     // Exported for the helper classes (OozePrevention, Wipe) and for the Perl binding for unit tests.
     const Vec2d&    origin() const { return m_origin; }
@@ -190,7 +198,11 @@ public:
     static void append_full_config(const Print& print, std::string& str);
 
 protected:
+#if ENABLE_THUMBNAIL_GENERATOR
+    void            _do_export(Print& print, FILE* file, ThumbnailsGeneratorCallback thumbnail_cb);
+#else
     void            _do_export(Print &print, FILE *file);
+#endif //ENABLE_THUMBNAIL_GENERATOR
 
     // Object and support extrusions of the same PrintObject at the same print_z.
     struct LayerToPrint
@@ -350,9 +362,12 @@ protected:
     bool                                m_second_layer_things_done;
     // Index of a last object copy extruded.
     std::pair<const PrintObject*, Point> m_last_obj_copy;
-    // Layer heights for colorprint - updated before the export and erased during the process
-    // so no toolchange occurs twice.
-    std::vector<float> m_colorprint_heights;
+    /* Extensions for colorprint - now it's not a just color_print_heights, 
+     * there can be some custom gcode.
+     * Updated before the export and erased during the process,
+     * so no toolchange occurs twice.
+     * */
+    std::vector<Model::CustomGCode> m_custom_g_code_heights;
 
     // Time estimators
     GCodeTimeEstimator m_normal_time_estimator;

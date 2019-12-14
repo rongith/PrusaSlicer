@@ -22,7 +22,8 @@ public:
     const Point& operator[](Points::size_type idx) const { return this->points[idx]; }
 
     Polygon() {}
-    explicit Polygon(const Points &points): MultiPoint(points) {}
+    explicit Polygon(const Points &points) : MultiPoint(points) {}
+	Polygon(std::initializer_list<Point> points) : MultiPoint(points) {}
     Polygon(const Polygon &other) : MultiPoint(other.points) {}
     Polygon(Polygon &&other) : MultiPoint(std::move(other.points)) {}
 	static Polygon new_scale(const std::vector<Vec2d> &points) { 
@@ -66,6 +67,10 @@ public:
     Point point_projection(const Point &point) const;
 };
 
+inline bool operator==(const Polygon &lhs, const Polygon &rhs) { return lhs.points == rhs.points; }
+inline bool operator!=(const Polygon &lhs, const Polygon &rhs) { return lhs.points != rhs.points; }
+
+extern BoundingBox get_extents(const Points &points);
 extern BoundingBox get_extents(const Polygon &poly);
 extern BoundingBox get_extents(const Polygons &polygons);
 extern BoundingBox get_extents_rotated(const Polygon &poly, double angle);
@@ -86,6 +91,8 @@ extern bool        remove_sticks(Polygons &polys);
 // Remove polygons with less than 3 edges.
 extern bool        remove_degenerate(Polygons &polys);
 extern bool        remove_small(Polygons &polys, double min_area);
+extern void 	   remove_collinear(Polygon &poly);
+extern void 	   remove_collinear(Polygons &polys);
 
 // Append a vector of polygons at the end of another vector of polygons.
 inline void        polygons_append(Polygons &dst, const Polygons &src) { dst.insert(dst.end(), src.begin(), src.end()); }
@@ -98,6 +105,15 @@ inline void        polygons_append(Polygons &dst, Polygons &&src)
         std::move(std::begin(src), std::end(src), std::back_inserter(dst));
         src.clear();
     }
+}
+
+inline Polygons polygons_simplify(const Polygons &polys, double tolerance)
+{
+	Polygons out;
+	out.reserve(polys.size());
+	for (const Polygon &p : polys)
+		polygons_append(out, p.simplify(tolerance));
+	return out;
 }
 
 inline void polygons_rotate(Polygons &polys, double angle)

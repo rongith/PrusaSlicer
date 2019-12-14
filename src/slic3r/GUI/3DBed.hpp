@@ -67,6 +67,8 @@ public:
         MK2,
         MK3,
         SL1,
+        MINI,
+        ENDER3,
         Custom,
         Num_Types
     };
@@ -84,8 +86,6 @@ private:
     mutable GLTexture m_texture;
     // temporary texture shown until the main texture has still no levels compressed
     mutable GLTexture m_temp_texture;
-    // used to trigger 3D scene update once all compressed textures have been sent to GPU
-    mutable bool m_requires_canvas_update;
     mutable Shader m_shader;
     mutable unsigned int m_vbo_id;
     mutable GLBed m_model;
@@ -110,7 +110,7 @@ public:
     bool contains(const Point& point) const;
     Point point_projection(const Point& point) const;
 
-    void render(GLCanvas3D& canvas, float theta, float scale_factor) const;
+    void render(GLCanvas3D& canvas, float theta, float scale_factor, bool show_axes) const;
 
 private:
     void calc_bounding_boxes() const;
