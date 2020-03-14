@@ -113,6 +113,16 @@ void PrintConfigDef::init_common_params()
                    "If left blank, the default OS CA certificate repository is used.");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionString(""));
+    
+    def = this->add("elefant_foot_compensation", coFloat);
+    def->label = L("Elephant foot compensation");
+    def->category = L("Advanced");
+    def->tooltip = L("The first layer will be shrunk in the XY plane by the configured value "
+                     "to compensate for the 1st layer squish aka an Elephant Foot effect.");
+    def->sidetext = L("mm");
+    def->min = 0;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(0.2));
 }
 
 void PrintConfigDef::init_fff_params()
@@ -167,6 +177,17 @@ void PrintConfigDef::init_fff_params()
     def->full_label = L("Bottom solid layers");
     def->min = 0;
     def->set_default_value(new ConfigOptionInt(3));
+
+    def = this->add("bottom_solid_min_thickness", coFloat);
+    //TRN To be shown in Print Settings "Top solid layers"
+    def->label = L("Bottom");
+    def->category = L("Layers and Perimeters");
+    def->tooltip = L("The number of bottom solid layers is increased above bottom_solid_layers if necessary to satisfy "
+    				 "minimum thickness of bottom shell.");
+    def->full_label = L("Minimum bottom shell thickness");
+    def->sidetext = L("mm");
+    def->min = 0;
+    def->set_default_value(new ConfigOptionFloat(0.));
 
     def = this->add("bridge_acceleration", coFloat);
     def->label = L("Bridge");
@@ -359,16 +380,6 @@ void PrintConfigDef::init_fff_params()
     def->aliases = { "multiply_distance" };
     def->min = 0;
     def->set_default_value(new ConfigOptionFloat(6));
-
-    def = this->add("elefant_foot_compensation", coFloat);
-    def->label = L("Elephant foot compensation");
-    def->category = L("Advanced");
-    def->tooltip = L("The first layer will be shrunk in the XY plane by the configured value "
-                   "to compensate for the 1st layer squish aka an Elephant Foot effect.");
-    def->sidetext = L("mm");
-    def->min = 0;
-    def->mode = comAdvanced;
-    def->set_default_value(new ConfigOptionFloat(0));
 
     def = this->add("end_gcode", coString);
     def->label = L("End G-code");
@@ -574,7 +585,6 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("If layer print time is estimated below this number of seconds, fan will be enabled "
                    "and its speed will be calculated by interpolating the minimum and maximum speeds.");
     def->sidetext = L("approximate seconds");
-    def->width = 6;
     def->min = 0;
     def->max = 1000;
     def->mode = comExpert;
@@ -730,8 +740,9 @@ void PrintConfigDef::init_fff_params()
     def->gui_type = "f_enum_open";
     def->gui_flags = "show_value";
     def->enum_values.push_back("PLA");
-    def->enum_values.push_back("ABS");
     def->enum_values.push_back("PET");
+    def->enum_values.push_back("ABS");
+    def->enum_values.push_back("ASA");
     def->enum_values.push_back("FLEX");
     def->enum_values.push_back("HIPS");
     def->enum_values.push_back("EDGE");
@@ -763,6 +774,13 @@ void PrintConfigDef::init_fff_params()
     def->sidetext = L("money/kg");
     def->min = 0;
     def->set_default_value(new ConfigOptionFloats { 0. });
+
+    def = this->add("filament_spool_weight", coFloats);
+    def->label = L("Spool weight");
+    def->tooltip = L("Enter your filament spool weight. This is only for statistical information.");
+    def->sidetext = L("g");
+    def->min = 0;
+    def->set_default_value(new ConfigOptionFloats { 1000. });
 
     def = this->add("filament_settings_id", coStrings);
     def->set_default_value(new ConfigOptionStrings { "" });
@@ -1104,7 +1122,6 @@ void PrintConfigDef::init_fff_params()
     def->mode = comExpert;
     def->set_default_value(new ConfigOptionBool(true));
 
-    const int machine_limits_opt_width = 7;
     {
         struct AxisDefault {
             std::string         name;
@@ -1136,7 +1153,6 @@ void PrintConfigDef::init_fff_params()
             (void)L("Maximum feedrate of the E axis");
             def->sidetext = L("mm/s");
             def->min = 0;
-            def->width = machine_limits_opt_width;
             def->mode = comAdvanced;
             def->set_default_value(new ConfigOptionFloats(axis.max_feedrate));
             // Add the machine acceleration limits for XYZE axes (M201)
@@ -1154,7 +1170,6 @@ void PrintConfigDef::init_fff_params()
             (void)L("Maximum acceleration of the E axis");
             def->sidetext = L("mm/s²");
             def->min = 0;
-            def->width = machine_limits_opt_width;
             def->mode = comAdvanced;
             def->set_default_value(new ConfigOptionFloats(axis.max_acceleration));
             // Add the machine jerk limits for XYZE axes (M205)
@@ -1172,7 +1187,6 @@ void PrintConfigDef::init_fff_params()
             (void)L("Maximum jerk of the E axis");
             def->sidetext = L("mm/s");
             def->min = 0;
-            def->width = machine_limits_opt_width;
             def->mode = comAdvanced;
             def->set_default_value(new ConfigOptionFloats(axis.max_jerk));
         }
@@ -1185,7 +1199,6 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Minimum feedrate when extruding (M205 S)");
     def->sidetext = L("mm/s");
     def->min = 0;
-    def->width = machine_limits_opt_width;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats{ 0., 0. });
 
@@ -1196,7 +1209,6 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Minimum travel feedrate (M205 T)");
     def->sidetext = L("mm/s");
     def->min = 0;
-    def->width = machine_limits_opt_width;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats{ 0., 0. });
 
@@ -1207,7 +1219,6 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Maximum acceleration when extruding (M204 S)");
     def->sidetext = L("mm/s²");
     def->min = 0;
-    def->width = machine_limits_opt_width;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats{ 1500., 1250. });
 
@@ -1218,7 +1229,6 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Maximum acceleration when retracting (M204 T)");
     def->sidetext = L("mm/s²");
     def->min = 0;
-    def->width = machine_limits_opt_width;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloats{ 1500., 1250. });
 
@@ -1345,9 +1355,11 @@ void PrintConfigDef::init_fff_params()
     def->enum_values.push_back("octoprint");
     def->enum_values.push_back("duet");
     def->enum_values.push_back("flashair");
+    def->enum_values.push_back("astrobox");
     def->enum_labels.push_back("OctoPrint");
     def->enum_labels.push_back("Duet");
     def->enum_labels.push_back("FlashAir");
+    def->enum_labels.push_back("AstroBox");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionEnum<PrintHostType>(htOctoPrint));
 
@@ -1698,6 +1710,12 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionInt(1));
 
+    def = this->add("infinit_skirt", coBool);
+    def->label = L("Use unlimit skirt");
+    def->tooltip = L("If enabled, the skirt will be as tall as a highest printed object.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("skirts", coInt);
     def->label = L("Loops (minimum)");
     def->full_label = L("Skirt Loops");
@@ -1713,7 +1731,6 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("If layer print time is estimated below this number of seconds, print moves "
                    "speed will be scaled down to extend duration to this value.");
     def->sidetext = L("approximate seconds");
-    def->width = 6;
     def->min = 0;
     def->max = 1000;
     def->mode = comExpert;
@@ -1789,6 +1806,13 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Number of solid layers to generate on top and bottom surfaces.");
     def->shortcut.push_back("top_solid_layers");
     def->shortcut.push_back("bottom_solid_layers");
+    def->min = 0;
+
+    def = this->add("solid_min_thickness", coFloat);
+    def->label = L("Minimum thickness of a top / bottom shell");
+    def->tooltip = L("Minimum thickness of a top / bottom shell");
+    def->shortcut.push_back("top_solid_min_thickness");
+    def->shortcut.push_back("bottom_solid_min_thickness");
     def->min = 0;
 
     def = this->add("spiral_vase", coBool);
@@ -2137,6 +2161,18 @@ void PrintConfigDef::init_fff_params()
     def->min = 0;
     def->set_default_value(new ConfigOptionInt(3));
 
+    def = this->add("top_solid_min_thickness", coFloat);
+    //TRN To be shown in Print Settings "Top solid layers"
+    def->label = L("Top");
+    def->category = L("Layers and Perimeters");
+    def->tooltip = L("The number of top solid layers is increased above top_solid_layers if necessary to satisfy "
+    				 "minimum thickness of top shell."
+    				 " This is useful to prevent pillowing effect when printing with variable layer height.");
+    def->full_label = L("Minimum top shell thickness");
+    def->sidetext = L("mm");
+    def->min = 0;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
     def = this->add("travel_speed", coFloat);
     def->label = L("Travel");
     def->tooltip = L("Speed for travel moves (jumps between distant extrusion points).");
@@ -2431,6 +2467,15 @@ void PrintConfigDef::init_sla_params()
                       "to the sign of the correction.");
     def->mode = comExpert;
     def->set_default_value(new ConfigOptionFloat(0.0));
+    
+    def = this->add("elefant_foot_min_width", coFloat);
+    def->label = L("Elephant foot minimum width");
+    def->category = L("Advanced");
+    def->tooltip = L("Minimum width of features to maintain when doing elephant foot compensation.");
+    def->sidetext = L("mm");
+    def->min = 0;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(0.2));
 
     def = this->add("gamma_correction", coFloat);
     def->label = L("Printer gamma correction");
@@ -2633,6 +2678,16 @@ void PrintConfigDef::init_sla_params()
     def->max = 15;
     def->mode = comSimple;
     def->set_default_value(new ConfigOptionFloat(1.0));
+    
+    def = this->add("support_max_bridges_on_pillar", coInt);
+    def->label = L("Max bridges on a pillar");
+    def->tooltip = L(
+        "Maximum number of bridges that can be placed on a pillar. Bridges "
+        "hold support point pinheads and connect to pillars as small branches.");
+    def->min = 0;
+    def->max = 50;
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionInt(3));
 
     def = this->add("support_pillar_connection_mode", coEnum);
     def->label = L("Support pillar connection mode");
@@ -2829,7 +2884,7 @@ void PrintConfigDef::init_sla_params()
     def->min = 45;
     def->max = 90;
     def->mode = comAdvanced;
-    def->set_default_value(new ConfigOptionFloat(45.0));
+    def->set_default_value(new ConfigOptionFloat(90.0));
 
     def = this->add("pad_around_object", coBool);
     def->label = L("Pad around object");
@@ -2883,6 +2938,47 @@ void PrintConfigDef::init_sla_params()
     def->min = 0;
     def->mode = comExpert;
     def->set_default_value(new ConfigOptionFloat(0.3));
+    
+    def = this->add("hollowing_enable", coBool);
+    def->label = L("Enable hollowing");
+    def->category = L("Hollowing");
+    def->tooltip = L("Hollow out a model to have an empty interior");
+    def->mode = comSimple;
+    def->set_default_value(new ConfigOptionBool(false));
+    
+    def = this->add("hollowing_min_thickness", coFloat);
+    def->label = L("Wall thickness");
+    def->category = L("Hollowing");
+    def->tooltip  = L("Minimum wall thickness of a hollowed model.");
+    def->sidetext = L("mm");
+    def->min = 1;
+    def->max = 10;
+    def->mode = comSimple;
+    def->set_default_value(new ConfigOptionFloat(3.));
+    
+    def = this->add("hollowing_quality", coFloat);
+    def->label = L("Accuracy");
+    def->category = L("Hollowing");
+    def->tooltip  = L("Performance vs accuracy of calculation. Lower values may produce unwanted artifacts.");
+    def->min = 0;
+    def->max = 1;
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionFloat(0.5));
+    
+    def = this->add("hollowing_closing_distance", coFloat);
+    def->label = L("Closing distance");
+    def->category = L("Hollowing");
+    def->tooltip  = L(
+        "Hollowing is done in two steps: first, an imaginary interior is "
+        "calculated deeper (offset plus the closing distance) in the object and "
+        "then it's inflated back to the specified offset. A greater closing "
+        "distance makes the interior more rounded. At zero, the interior will "
+        "resemble the exterior the most.");
+    def->sidetext = L("mm");
+    def->min = 0;
+    def->max = 10;
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionFloat(2.0));
 }
 
 void PrintConfigDef::handle_legacy(t_config_option_key &opt_key, std::string &value)
@@ -3445,7 +3541,8 @@ CLIMiscConfigDef::CLIMiscConfigDef()
 
     def = this->add("loglevel", coInt);
     def->label = L("Logging level");
-    def->tooltip = L("Messages with severity lower or eqal to the loglevel will be printed out. 0:trace, 1:debug, 2:info, 3:warning, 4:error, 5:fatal");
+    def->tooltip = L("Sets logging sensitivity. 0:fatal, 1:error, 2:warning, 3:info, 4:debug, 5:trace\n"
+                     "For example. loglevel=2 logs fatal, error and warning level messages.");
     def->min = 0;
 
 #if (defined(_MSC_VER) || defined(__MINGW32__)) && defined(SLIC3R_GUI)

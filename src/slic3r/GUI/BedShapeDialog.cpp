@@ -61,9 +61,7 @@ void BedShapePanel::build_panel(const ConfigOptionPoints& default_pt, const Conf
 {
     m_shape = default_pt.values;
     m_custom_texture = custom_texture.value.empty() ? NONE : custom_texture.value;
-    std::replace(m_custom_texture.begin(), m_custom_texture.end(), '\\', '/');
     m_custom_model = custom_model.value.empty() ? NONE : custom_model.value;
-    std::replace(m_custom_model.begin(), m_custom_model.end(), '\\', '/');
 
     auto sbsizer = new wxStaticBoxSizer(wxVERTICAL, this, _(L("Shape")));
     sbsizer->GetStaticBox()->SetFont(wxGetApp().bold_font());
@@ -222,7 +220,7 @@ wxPanel* BedShapePanel::init_texture_panel()
                     if (m_custom_texture != NONE)
                     {
                         if (!exists)
-                            tooltip_text += _(L("Not found: "));
+                            tooltip_text += _(L("Not found:")) + " ";
 
                         tooltip_text += _(m_custom_texture);
                     }
@@ -301,7 +299,7 @@ wxPanel* BedShapePanel::init_model_panel()
                     if (m_custom_model != NONE)
                     {
                         if (!exists)
-                            tooltip_text += _(L("Not found: "));
+                            tooltip_text += _(L("Not found:")) + " ";
 
                         tooltip_text += _(m_custom_model);
                     }
@@ -546,8 +544,6 @@ void BedShapePanel::load_texture()
         return;
     }
 
-    std::replace(file_name.begin(), file_name.end(), '\\', '/');
-
     wxBusyCursor wait;
 
     m_custom_texture = file_name;
@@ -570,8 +566,6 @@ void BedShapePanel::load_model()
         show_error(this, _(L("Invalid file format.")));
         return;
     }
-
-    std::replace(file_name.begin(), file_name.end(), '\\', '/');
 
     wxBusyCursor wait;
 

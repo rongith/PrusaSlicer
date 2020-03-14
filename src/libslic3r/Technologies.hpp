@@ -41,16 +41,13 @@
 #define ENABLE_THUMBNAIL_GENERATOR (1 && ENABLE_2_2_0_ALPHA1)
 #define ENABLE_THUMBNAIL_GENERATOR_DEBUG (0 && ENABLE_THUMBNAIL_GENERATOR)
 
-// Enable adaptive layer height profile
-#define ENABLE_ADAPTIVE_LAYER_HEIGHT_PROFILE (1 && ENABLE_2_2_0_ALPHA1)
 
-// Enable grayed variant for gizmos icons in non activable state
-#define ENABLE_GIZMO_ICONS_NON_ACTIVABLE_STATE (1 && ENABLE_2_2_0_ALPHA1)
+//==================
+// 2.2.0.rc1 techs
+//==================
+#define ENABLE_2_2_0_RC1 1
 
-// Enable fix for view toolbar background not showing up on Mac with dark mode
-#define ENABLE_VIEW_TOOLBAR_BACKGROUND_FIX (1 && ENABLE_2_2_0_ALPHA1)
-
-// Enable selection for missing files in reload from disk command
-#define ENABLE_RELOAD_FROM_DISK_MISSING_SELECTION (1 && ENABLE_2_2_0_ALPHA1)
+// Enable hack to remove crash when closing on OSX 10.9.5
+#define ENABLE_HACK_CLOSING_ON_OSX_10_9_5 (1 && ENABLE_2_2_0_RC1)
 
 #endif // _technologies_h_

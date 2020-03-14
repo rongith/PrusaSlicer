@@ -1000,13 +1000,13 @@ std::vector<std::pair<size_t, bool>> chain_extrusion_entities(std::vector<Extrus
 	auto segment_end_point = [&entities](size_t idx, bool first_point) -> const Point& { return first_point ? entities[idx]->first_point() : entities[idx]->last_point(); };
 	auto could_reverse = [&entities](size_t idx) { const ExtrusionEntity *ee = entities[idx]; return ee->is_loop() || ee->can_reverse(); };
 	std::vector<std::pair<size_t, bool>> out = chain_segments_greedy_constrained_reversals<Point, decltype(segment_end_point), decltype(could_reverse)>(segment_end_point, could_reverse, entities.size(), start_near);
-	for (size_t i = 0; i < entities.size(); ++ i) {
-		ExtrusionEntity *ee = entities[i];
+	for (std::pair<size_t, bool> &segment : out) {
+		ExtrusionEntity *ee = entities[segment.first];
 		if (ee->is_loop())
 			// Ignore reversals for loops, as the start point equals the end point.
-			out[i].second = false;
+			segment.second = false;
 		// Is can_reverse() respected by the reversals?
-		assert(entities[i]->can_reverse() || ! out[i].second);
+		assert(ee->can_reverse() || ! segment.second);
 	}
 	return out;
 }
@@ -1946,24 +1946,27 @@ ClipperLib::PolyNodes chain_clipper_polynodes(const Points &points, const Clippe
 	return chain_path_items(points, items);
 }
 
-std::vector<std::pair<size_t, size_t>> chain_print_object_instances(const Print &print)
+std::vector<const PrintInstance*> chain_print_object_instances(const Print &print)
 {
     // Order objects using a nearest neighbor search.
     Points object_reference_points;
     std::vector<std::pair<size_t, size_t>> instances;
     for (size_t i = 0; i < print.objects().size(); ++ i) {
     	const PrintObject &object = *print.objects()[i];
-    	for (size_t j = 0; j < object.copies().size(); ++ j) {
-        	object_reference_points.emplace_back(object.copy_center(j));
+    	for (size_t j = 0; j < object.instances().size(); ++ j) {
+    		// Sliced PrintObjects are centered, object.instances()[j].shift is the center of the PrintObject in G-code coordinates.
+        	object_reference_points.emplace_back(object.instances()[j].shift);
         	instances.emplace_back(i, j);
         }
     }
 	auto segment_end_point = [&object_reference_points](size_t idx, bool /* first_point */) -> const Point& { return object_reference_points[idx]; };
 	std::vector<std::pair<size_t, bool>> ordered = chain_segments_greedy<Point, decltype(segment_end_point)>(segment_end_point, instances.size(), nullptr);
-    std::vector<std::pair<size_t, size_t>> out;
+    std::vector<const PrintInstance*> out;
 	out.reserve(instances.size());
-	for (auto &segment_and_reversal : ordered)
-		out.emplace_back(instances[segment_and_reversal.first]);
+	for (auto &segment_and_reversal : ordered) {
+		const std::pair<size_t, size_t> &inst = instances[segment_and_reversal.first];
+		out.emplace_back(&print.objects()[inst.first]->instances()[inst.second]);
+	}
 	return out;
 }
 

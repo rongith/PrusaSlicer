@@ -56,11 +56,14 @@ public:
 
     bool begin(const std::string &name, int flags = 0);
     bool begin(const wxString &name, int flags = 0);
+    bool begin(const std::string& name, bool* close, int flags = 0);
+    bool begin(const wxString& name, bool* close, int flags = 0);
     void end();
 
     bool button(const wxString &label);
     bool radio_button(const wxString &label, bool active);
     bool input_double(const std::string &label, const double &value, const std::string &format = "%.3f");
+    bool input_double(const wxString &label, const double &value, const std::string &format = "%.3f");
     bool input_vec3(const std::string &label, const Vec3d &value, float width, const std::string &format = "%.3f");
     bool checkbox(const wxString &label, bool &value);
     void text(const char *label);

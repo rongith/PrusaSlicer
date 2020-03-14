@@ -4,8 +4,7 @@
 #include <GL/glew.h>
 
 #include "slic3r/GUI/GUI_App.hpp"
-
-
+#include "slic3r/GUI/GLCanvas3D.hpp"
 
 
 
@@ -300,6 +299,7 @@ unsigned char picking_checksum_alpha_channel(unsigned char red, unsigned char gr
 	b ^= 0x55;
 	return b;
 }
+
 
 } // namespace GUI
 } // namespace Slic3r

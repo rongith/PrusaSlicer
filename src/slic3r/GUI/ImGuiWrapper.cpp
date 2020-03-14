@@ -254,6 +254,16 @@ bool ImGuiWrapper::begin(const wxString &name, int flags)
     return begin(into_u8(name), flags);
 }
 
+bool ImGuiWrapper::begin(const std::string& name, bool* close, int flags)
+{
+    return ImGui::Begin(name.c_str(), close, (ImGuiWindowFlags)flags);
+}
+
+bool ImGuiWrapper::begin(const wxString& name, bool* close, int flags)
+{
+    return begin(into_u8(name), close, flags);
+}
+
 void ImGuiWrapper::end()
 {
     ImGui::End();
@@ -274,6 +284,12 @@ bool ImGuiWrapper::radio_button(const wxString &label, bool active)
 bool ImGuiWrapper::input_double(const std::string &label, const double &value, const std::string &format)
 {
     return ImGui::InputDouble(label.c_str(), const_cast<double*>(&value), 0.0f, 0.0f, format.c_str());
+}
+
+bool ImGuiWrapper::input_double(const wxString &label, const double &value, const std::string &format)
+{
+    auto label_utf8 = into_u8(label);
+    return input_double(label_utf8, value, format);
 }
 
 bool ImGuiWrapper::input_vec3(const std::string &label, const Vec3d &value, float width, const std::string &format)

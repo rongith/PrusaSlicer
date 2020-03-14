@@ -30,7 +30,8 @@ static const float CONSTRAINED_COLOR[4] = { 0.5f, 0.5f, 0.5f, 1.0f };
 
 
 class ImGuiWrapper;
-
+class GLCanvas3D;
+class ClippingPlane;
 
 class GLGizmoBase
 {
@@ -101,7 +102,9 @@ protected:
     bool m_first_input_window_render;
 
 public:
-    GLGizmoBase(GLCanvas3D& parent, const std::string& icon_filename, unsigned int sprite_id);
+    GLGizmoBase(GLCanvas3D& parent,
+                const std::string& icon_filename,
+                unsigned int sprite_id);
     virtual ~GLGizmoBase() {}
 
     bool init() { return on_init(); }
