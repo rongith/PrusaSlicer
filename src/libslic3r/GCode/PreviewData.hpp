@@ -201,6 +201,8 @@ public:
         MultiRange<FeedrateKind> feedrate;
         // Color mapping by fan speed.
         Range fan_speed;
+        // Color mapping by layer time.
+        Range layer_time;
         // Color mapping by volumetric extrusion rate.
         Range volumetric_rate;
     };
@@ -224,6 +226,7 @@ public:
             Width,
             Feedrate,
             FanSpeed,
+            LayerTime,
             VolumetricRate,
             Tool,
             ColorPrint,
@@ -253,7 +256,9 @@ public:
 		    uint32_t	 	cp_color_id;
 		    // Fan speed for the extrusion, used for visualization purposes.
 		    float 			fan_speed;
-		};
+            // Layer time for the extrusion, used for visualization purposes.
+            float 			layer_time;
+        };
 		using Paths = std::vector<Path>;
 
         struct Layer
@@ -378,6 +383,7 @@ public:
     Color get_width_color(float width) const;
     Color get_feedrate_color(float feedrate) const;
     Color get_fan_speed_color(float fan_speed) const;
+    Color get_layer_time_color(float layer_time) const;
     Color get_volumetric_rate_color(float rate) const;
 
     void set_extrusion_role_color(const std::string& role_name, float red, float green, float blue, float alpha);
