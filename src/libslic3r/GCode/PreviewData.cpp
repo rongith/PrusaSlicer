@@ -387,7 +387,7 @@ GCodePreviewData::LegendItemsList GCodePreviewData::get_legend_items(const std::
             if (minutes > 0)
                 ::sprintf(buffer, "%dm %ds", minutes, (int)time_in_secs);
             else
-                ::sprintf(buffer, "%ds", (int)time_in_secs);
+                ::sprintf(buffer, "%.*fs", 1, time_in_secs);
             return buffer;
         }
         
