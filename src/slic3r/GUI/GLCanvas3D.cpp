@@ -61,9 +61,11 @@
 #include <algorithm>
 #include <cmath>
 #include "DoubleSlider.hpp"
+#if !ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 #if ENABLE_RENDER_STATISTICS
 #include <chrono>
 #endif // ENABLE_RENDER_STATISTICS
+#endif // !ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 
 #include <imgui/imgui_internal.h>
 
@@ -1370,6 +1372,88 @@ void GLCanvas3D::Labels::render(const std::vector<const ModelInstance*>& sorted_
     }
 }
 
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+void GLCanvas3D::Tooltip::set_text(const std::string& text)
+{
+    // If the mouse is inside an ImGUI dialog, then the tooltip is suppressed.
+	const std::string &new_text = m_in_imgui ? std::string() : text;
+    if (m_text != new_text)
+    {
+        if (m_text.empty())
+            m_start_time = std::chrono::steady_clock::now();
+
+        m_text = new_text;
+    }
+}
+#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+
+#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+void GLCanvas3D::Tooltip::render(const Vec2d& mouse_position, GLCanvas3D& canvas) const
+#else
+void GLCanvas3D::Tooltip::render(const Vec2d& mouse_position) const
+#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+{
+#if ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
+    static ImVec2 size(0.0f, 0.0f);
+
+    auto validate_position = [](const Vec2d& position, const GLCanvas3D& canvas, const ImVec2& wnd_size) {
+        Size cnv_size = canvas.get_canvas_size();
+        float x = std::clamp((float)position(0), 0.0f, (float)cnv_size.get_width() - wnd_size.x);
+        float y = std::clamp((float)position(1) + 16, 0.0f, (float)cnv_size.get_height() - wnd_size.y);
+        return Vec2f(x, y);
+    };
+#endif // ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
+
+#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+    if (m_text.empty())
+        return;
+
+    // draw the tooltip as hidden until the delay is expired
+    float alpha = (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_start_time).count() < 500) ? 0.0f : 1.0;
+#else
+    if (m_text.empty())
+        return;
+#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+
+#if ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
+    Vec2f position = validate_position(mouse_position, canvas, size);
+#endif // ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
+
+    ImGuiWrapper& imgui = *wxGetApp().imgui();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
+#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+#if ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
+    imgui.set_next_window_pos(position(0), position(1), ImGuiCond_Always, 0.0f, 0.0f);
+#else
+    imgui.set_next_window_pos(mouse_position(0), mouse_position(1) + 16, ImGuiCond_Always, 0.0f, 0.0f);
+#endif // ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
+
+    imgui.begin(_(L("canvas_tooltip")), ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMouseInputs | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+    ImGui::TextUnformatted(m_text.c_str());
+
+#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+    // force re-render while the windows gets to its final size (it may take several frames) or while hidden
+    if (alpha == 0.0f || ImGui::GetWindowContentRegionWidth() + 2.0f * ImGui::GetStyle().WindowPadding.x != ImGui::CalcWindowExpectedSize(ImGui::GetCurrentWindow()).x)
+        canvas.request_extra_frame();
+#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+
+#if ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
+    size = ImGui::GetWindowSize();
+#endif // ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
+
+    imgui.end();
+#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+    ImGui::PopStyleVar(2);
+#else
+    ImGui::PopStyleVar();
+#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+}
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+
 wxDEFINE_EVENT(EVT_GLCANVAS_SCHEDULE_BACKGROUND_PROCESS, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_OBJECT_SELECT, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_RIGHT_CLICK, RBtnEvent);
@@ -1941,6 +2025,38 @@ void GLCanvas3D::render()
     m_camera.debug_render();
 #endif // ENABLE_CAMERA_STATISTICS
 
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+    std::string tooltip;
+
+	// Negative coordinate means out of the window, likely because the window was deactivated.
+	// In that case the tooltip should be hidden.
+    if (m_mouse.position.x() >= 0. && m_mouse.position.y() >= 0.) 
+    {
+	    if (tooltip.empty())
+	        tooltip = m_layers_editing.get_tooltip(*this);
+
+	    if (tooltip.empty())
+	        tooltip = m_gizmos.get_tooltip();
+
+	    if (tooltip.empty())
+	        tooltip = m_main_toolbar.get_tooltip();
+
+	    if (tooltip.empty())
+	        tooltip = m_undoredo_toolbar.get_tooltip();
+
+	    if (tooltip.empty())
+	        tooltip = m_view_toolbar.get_tooltip();
+	}
+
+    set_tooltip(tooltip);
+
+#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+    m_tooltip.render(m_mouse.position, *this);
+#else
+    m_tooltip.render(m_mouse.position);
+#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+
     wxGetApp().plater()->get_mouse3d_controller().render_settings_dialog(*this);
 
     wxGetApp().imgui()->render();
@@ -1951,6 +2067,27 @@ void GLCanvas3D::render()
     auto end_time = std::chrono::high_resolution_clock::now();
     m_render_stats.last_frame = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 #endif // ENABLE_RENDER_STATISTICS
+
+#if !ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+    std::string tooltip = "";
+
+    if (tooltip.empty())
+        tooltip = m_layers_editing.get_tooltip(*this);
+
+    if (tooltip.empty())
+        tooltip = m_gizmos.get_tooltip();
+
+    if (tooltip.empty())
+        tooltip = m_main_toolbar.get_tooltip();
+
+    if (tooltip.empty())
+        tooltip = m_undoredo_toolbar.get_tooltip();
+
+    if (tooltip.empty())
+        tooltip = m_view_toolbar.get_tooltip();
+
+    set_tooltip(tooltip);
+#endif // !ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 }
 
 #if ENABLE_THUMBNAIL_GENERATOR
@@ -3200,16 +3337,24 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
     evt.SetY(evt.GetY() * scale);
 #endif
 
-	Point pos(evt.GetX(), evt.GetY());
+    Point pos(evt.GetX(), evt.GetY());
 
-    ImGuiWrapper *imgui = wxGetApp().imgui();
+    ImGuiWrapper* imgui = wxGetApp().imgui();
+    m_tooltip.set_in_imgui(false);
     if (imgui->update_mouse_data(evt)) {
         m_mouse.position = evt.Leaving() ? Vec2d(-1.0, -1.0) : pos.cast<double>();
+        m_tooltip.set_in_imgui(true);
         render();
 #ifdef SLIC3R_DEBUG_MOUSE_EVENTS
-		printf((format_mouse_event_debug_message(evt) + " - Consumed by ImGUI\n").c_str());
+        printf((format_mouse_event_debug_message(evt) + " - Consumed by ImGUI\n").c_str());
 #endif /* SLIC3R_DEBUG_MOUSE_EVENTS */
-		return;
+        // do not return if dragging or tooltip not empty to allow for tooltip update
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+        if (!m_mouse.dragging && m_tooltip.is_empty())
+#else
+        if (!m_mouse.dragging && m_canvas->GetToolTipText().empty())
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+            return;
     }
 
 #ifdef __WXMSW__
@@ -3260,6 +3405,9 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
             mouse_up_cleanup();
 
         m_mouse.set_start_position_3D_as_invalid();
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+        m_mouse.position = pos.cast<double>();
+#endif /// ENABLE_CANVAS_TOOLTIP_USING_IMGUI
         return;
     }
 
@@ -3466,11 +3614,26 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
             if (m_hover_volume_idxs.empty() && m_mouse.is_start_position_3D_defined())
             {
                 const Vec3d rot = (Vec3d(pos.x(), pos.y(), 0.) - m_mouse.drag.start_position_3D) * (PI * TRACKBALLSIZE / 180.);
+#if ENABLE_AUTO_CONSTRAINED_CAMERA
+                if (wxGetApp().app_config->get("use_free_camera") == "1")
+                    // Virtual track ball (similar to the 3DConnexion mouse).
+                    m_camera.rotate_local_around_target(Vec3d(rot.y(), rot.x(), 0.));
+                else
+                {
+                	// Forces camera right vector to be parallel to XY plane in case it has been misaligned using the 3D mouse free rotation.
+                	// It is cheaper to call this function right away instead of testing wxGetApp().plater()->get_mouse3d_controller().connected(),
+                	// which checks an atomics (flushes CPU caches).
+                	// See GH issue #3816.
+                    m_camera.recover_from_free_camera();
+                    m_camera.rotate_on_sphere(rot.x(), rot.y(), wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology() != ptSLA);
+                }
+#else
                 if (wxGetApp().plater()->get_mouse3d_controller().connected() || (wxGetApp().app_config->get("use_free_camera") == "1"))
                     // Virtual track ball (similar to the 3DConnexion mouse).
                     m_camera.rotate_local_around_target(Vec3d(rot.y(), rot.x(), 0.));
                 else
                     m_camera.rotate_on_sphere(rot.x(), rot.y(), wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology() != ptSLA);
+#endif // ENABLE_AUTO_CONSTRAINED_CAMERA
 
                 m_dirty = true;
             }
@@ -3485,6 +3648,15 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
                 float z = 0.0f;
                 const Vec3d& cur_pos = _mouse_to_3d(pos, &z);
                 Vec3d orig = _mouse_to_3d(m_mouse.drag.start_position_2D, &z);
+#if ENABLE_AUTO_CONSTRAINED_CAMERA
+                if (wxGetApp().app_config->get("use_free_camera") != "1")
+                	// Forces camera right vector to be parallel to XY plane in case it has been misaligned using the 3D mouse free rotation.
+                	// It is cheaper to call this function right away instead of testing wxGetApp().plater()->get_mouse3d_controller().connected(),
+                	// which checks an atomics (flushes CPU caches).
+                	// See GH issue #3816.
+                    m_camera.recover_from_free_camera();
+#endif // ENABLE_AUTO_CONSTRAINED_CAMERA
+
                 m_camera.set_target(m_camera.get_target() + orig - cur_pos);
                 m_dirty = true;
             }
@@ -3563,24 +3735,6 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
     else if (evt.Moving())
     {
         m_mouse.position = pos.cast<double>();
-        std::string tooltip = "";
-
-        if (tooltip.empty())
-            tooltip = m_layers_editing.get_tooltip(*this);
-
-        if (tooltip.empty())
-            tooltip = m_gizmos.get_tooltip();
-
-        if (tooltip.empty())
-            tooltip = m_main_toolbar.get_tooltip();
-
-        if (tooltip.empty())
-            tooltip = m_undoredo_toolbar.get_tooltip();
-
-        if (tooltip.empty())
-            tooltip = m_view_toolbar.get_tooltip();
-
-        set_tooltip(tooltip);
 
         // updates gizmos overlay
         if (m_selection.is_empty())
@@ -3655,19 +3809,26 @@ void GLCanvas3D::set_tooltip(const std::string& tooltip) const
 {
     if (m_canvas != nullptr)
     {
-        wxToolTip* t = m_canvas->GetToolTip();
-        if (t != nullptr)
-        {
-            if (tooltip.empty())
-                m_canvas->UnsetToolTip();
-            else
-                t->SetTip(wxString::FromUTF8(tooltip.data()));
-        }
-        else if (!tooltip.empty()) // Avoid "empty" tooltips => unset of the empty tooltip leads to application crash under OSX
-            m_canvas->SetToolTip(wxString::FromUTF8(tooltip.data()));
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+        m_tooltip.set_text(tooltip);
+#else
+        wxString txt = wxString::FromUTF8(tooltip.data());
+        if (m_canvas->GetToolTipText() != txt)
+            m_canvas->SetToolTip(txt);
+
+//        wxToolTip* t = m_canvas->GetToolTip();
+//        if (t != nullptr)
+//        {
+//            if (tooltip.empty())
+//                m_canvas->UnsetToolTip();
+//            else
+//                t->SetTip(wxString::FromUTF8(tooltip.data()));
+//        }
+//        else if (!tooltip.empty()) // Avoid "empty" tooltips => unset of the empty tooltip leads to application crash under OSX
+//            m_canvas->SetToolTip(wxString::FromUTF8(tooltip.data()));
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     }
 }
-
 
 void GLCanvas3D::do_move(const std::string& snapshot_type)
 {

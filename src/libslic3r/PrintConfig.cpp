@@ -254,7 +254,7 @@ void PrintConfigDef::init_fff_params()
                    "to clip the overlapping object parts one by the other "
                    "(2nd part will be clipped by the 1st, 3rd part will be clipped by the 1st and 2nd etc).");
     def->mode = comExpert;
-    def->set_default_value(new ConfigOptionBool(false));
+    def->set_default_value(new ConfigOptionBool(true));
 
     def = this->add("colorprint_heights", coFloats);
     def->label = L("Colorprint height");
@@ -774,13 +774,6 @@ void PrintConfigDef::init_fff_params()
     def->sidetext = L("money/kg");
     def->min = 0;
     def->set_default_value(new ConfigOptionFloats { 0. });
-
-    def = this->add("filament_spool_weight", coFloats);
-    def->label = L("Spool weight");
-    def->tooltip = L("Enter your filament spool weight. This is only for statistical information.");
-    def->sidetext = L("g");
-    def->min = 0;
-    def->set_default_value(new ConfigOptionFloats { 1000. });
 
     def = this->add("filament_settings_id", coStrings);
     def->set_default_value(new ConfigOptionStrings { "" });
@@ -1710,9 +1703,10 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionInt(1));
 
-    def = this->add("infinit_skirt", coBool);
-    def->label = L("Use unlimit skirt");
-    def->tooltip = L("If enabled, the skirt will be as tall as a highest printed object.");
+    def = this->add("draft_shield", coBool);
+    def->label = L("Draft shield");
+    def->tooltip = L("If enabled, the skirt will be as tall as a highest printed object. "
+    				 "This is useful to protect an ABS or ASA print from warping and detaching from print bed due to wind draft.");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
@@ -3023,6 +3017,11 @@ void PrintConfigDef::handle_legacy(t_config_option_key &opt_key, std::string &va
     } else if (opt_key == "support_material_pattern" && value == "pillars") {
         // Slic3r PE does not support the pillars. They never worked well.
         value = "rectilinear";
+    } else if (opt_key == "skirt_height" && value == "-1") {
+    	// PrusaSlicer no more accepts skirt_height == -1 to print a draft shield to the top of the highest object.
+    	// A new "draft_shield" boolean config value is used instead.
+    	opt_key = "draft_shield";
+    	value = "1";
     } else if (opt_key == "octoprint_host") {
         opt_key = "print_host";
     } else if (opt_key == "octoprint_cafile") {
@@ -3231,7 +3230,7 @@ std::string FullPrintConfig::validate()
         return "Invalid value for --infill-every-layers";
 
     // --skirt-height
-    if (this->skirt_height < -1) // -1 means as tall as the object
+    if (this->skirt_height < 0)
         return "Invalid value for --skirt-height";
 
     // --bridge-flow-ratio

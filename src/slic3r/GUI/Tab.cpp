@@ -1100,12 +1100,6 @@ void Tab::update_frequently_changed_parameters()
     }
 }
 
-void Tab::update_sliced_info_on_plater()
-{
-    wxGetApp().sidebar().update_sliced_info_sizer();
-    wxGetApp().sidebar().Layout();
-}
-
 void TabPrint::build()
 {
     m_presets = &m_preset_bundle->prints;
@@ -1178,7 +1172,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("skirts");
         optgroup->append_single_option_line("skirt_distance");
         optgroup->append_single_option_line("skirt_height");
-        optgroup->append_single_option_line("infinit_skirt");
+        optgroup->append_single_option_line("draft_shield");
         optgroup->append_single_option_line("min_skirt_length");
 
         optgroup = page->new_optgroup(_(L("Brim")));
@@ -1365,7 +1359,10 @@ void TabPrint::update()
     if (m_update_cnt==0) {
         m_config_manipulation.toggle_print_fff_options(m_config);
 
-        wxGetApp().obj_list()->update_and_show_object_settings_item();
+        // update() could be called during undo/redo execution
+        // Update of objectList can cause a crash in this case (because m_objects doesn't match ObjectList) 
+        if (!wxGetApp().plater()->inside_snapshot_capture())
+            wxGetApp().obj_list()->update_and_show_object_settings_item();
 
         wxGetApp().mainframe->on_config_changed(m_config);
     }
@@ -1491,19 +1488,6 @@ void TabFilament::build()
         optgroup->append_single_option_line("extrusion_multiplier");
         optgroup->append_single_option_line("filament_density");
         optgroup->append_single_option_line("filament_cost");
-        optgroup->append_single_option_line("filament_spool_weight");
-
-        optgroup->m_on_change = [this, optgroup](t_config_option_key opt_key, boost::any value)
-        {
-            update_dirty();
-
-            if (opt_key== "filament_spool_weight")
-                // Change of this option only has an influence to an update of "Sliced Info"
-                update_sliced_info_on_plater();
-            else
-                // update configuration for its check and to schedule a background process, if needed
-                update();
-        };
 
         optgroup = page->new_optgroup(_(L("Temperature")) + wxString(" °C", wxConvUTF8));
         Line line = { _(L("Extruder")), "" };
@@ -3588,7 +3572,8 @@ void TabSLAMaterial::build()
         update_dirty();
 
         // Change of any from those options influences for an update of "Sliced Info"
-        update_sliced_info_on_plater();
+        wxGetApp().sidebar().update_sliced_info_sizer();
+        wxGetApp().sidebar().Layout();
     };
 
     optgroup = page->new_optgroup(_(L("Layers")));
@@ -3780,7 +3765,10 @@ void TabSLAPrint::update()
     if (m_update_cnt == 0) {
         m_config_manipulation.toggle_print_sla_options(m_config);
 
-        wxGetApp().obj_list()->update_and_show_object_settings_item();
+        // update() could be called during undo/redo execution
+        // Update of objectList can cause a crash in this case (because m_objects doesn't match ObjectList) 
+        if (!wxGetApp().plater()->inside_snapshot_capture())
+            wxGetApp().obj_list()->update_and_show_object_settings_item();
 
         wxGetApp().mainframe->on_config_changed(m_config);
     }

@@ -207,11 +207,9 @@ class SlicedInfo : public wxStaticBoxSizer
 public:
     SlicedInfo(wxWindow *parent);
     void SetTextAndShow(SlicedInfoIdx idx, const wxString& text, const wxString& new_label="");
-    void SetNoteAndShow(const wxString& text);
 
 private:
     std::vector<std::pair<wxStaticText*, wxStaticText*>> info_vec;
-    wxStaticText*       m_notes {nullptr};
 };
 
 SlicedInfo::SlicedInfo(wxWindow *parent) :
@@ -243,10 +241,6 @@ SlicedInfo::SlicedInfo(wxWindow *parent) :
     init_info_label(_(L("Number of tool changes")));
 
     Add(grid_sizer, 0, wxEXPAND);
-
-    m_notes = new wxStaticText(parent, wxID_ANY, "N/A");
-    Add(m_notes, 0, wxEXPAND);
-
     this->Show(false);
 }
 
@@ -259,14 +253,6 @@ void SlicedInfo::SetTextAndShow(SlicedInfoIdx idx, const wxString& text, const w
         info_vec[idx].first->SetLabelText(new_label);
     info_vec[idx].first->Show(show);
     info_vec[idx].second->Show(show);
-}
-
-void SlicedInfo::SetNoteAndShow(const wxString& text)
-{
-    const bool show = text != "N/A";
-    if (show)
-        m_notes->SetLabelText(text);
-    m_notes->Show(show);
 }
 
 PresetComboBox::PresetComboBox(wxWindow *parent, Preset::Type preset_type) :
@@ -1259,18 +1245,6 @@ void Sidebar::update_sliced_info_sizer()
             p->sliced_info->SetTextAndShow(siFilament_mm3,  wxString::Format("%.2f", ps.total_extruded_volume));
             p->sliced_info->SetTextAndShow(siFilament_g,    ps.total_weight == 0.0 ? "N/A" : wxString::Format("%.2f", ps.total_weight));
 
-            // Show a note information, if there is not enough filaments to complete a print
-            wxString note = "N/A";
-            DynamicPrintConfig* cfg = wxGetApp().get_tab(Preset::TYPE_FILAMENT)->get_config();
-            auto filament_spool_weights = dynamic_cast<const ConfigOptionFloats*>(cfg->option("filament_spool_weight"))->values;
-            if (ps.total_weight > 0.0 && !filament_spool_weights.empty() && filament_spool_weights[0] > 0.0 && 
-                ps.total_weight > filament_spool_weights[0])
-                note = "\n" + _(L("WARNING")) + ":\n   " + 
-                       _(L("There is not enough filaments to complete a print")) + ".\n   " +
-                       from_u8((boost::format(_utf8(L("You only have %.2f g of the required %.2f g."))) % 
-                                filament_spool_weights[0] % ps.total_weight).str());
-            p->sliced_info->SetNoteAndShow(note);
-
             new_label = _(L("Cost"));
             if (is_wipe_tower)
                 new_label += from_u8((boost::format(":\n    - %1%\n    - %2%") % _utf8(L("objects")) % _utf8(L("wipe tower"))).str());
@@ -2018,6 +1992,7 @@ struct Plater::priv
     mutable bool    			ready_to_slice = { false };
     // Flag indicating that the G-code export targets a removable device, therefore the show_action_buttons() needs to be called at any case when the background processing finishes.
     bool 						writing_to_removable_device = { false };
+    bool                        inside_snapshot_capture() { return m_prevent_snapshots != 0; }
 
 private:
     bool init_object_menu();
@@ -2311,13 +2286,6 @@ void Plater::priv::reset_all_gizmos()
 // Update the UI based on the current preferences.
 void Plater::priv::update_ui_from_settings()
 {
-    // TODO: (?)
-    // my ($self) = @_;
-    // if (defined($self->{btn_reslice}) && $self->{buttons_sizer}->IsShown($self->{btn_reslice}) != (! wxTheApp->{app_config}->get("background_processing"))) {
-    //     $self->{buttons_sizer}->Show($self->{btn_reslice}, ! wxTheApp->{app_config}->get("background_processing"));
-    //     $self->{buttons_sizer}->Layout;
-    // }
-
     camera.set_type(wxGetApp().app_config->get("use_perspective_camera"));
     if (wxGetApp().app_config->get("use_free_camera") != "1")
         camera.recover_from_free_camera();
@@ -2534,7 +2502,7 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
             selection.add_object((unsigned int)idx, false);
         }
 
-        if (view3D->get_canvas3d()->get_gizmos_manager().is_running())
+        if (view3D->get_canvas3d()->get_gizmos_manager().is_enabled())
             // this is required because the selected object changed and the flatten on face an sla support gizmos need to be updated accordingly
             view3D->get_canvas3d()->update_gizmos_on_off_state();
     }
@@ -3668,8 +3636,8 @@ void Plater::priv::on_select_preset(wxCommandEvent &evt)
     //! instead of
     //!     combo->GetStringSelection().ToUTF8().data());
 
-    const std::string& selected_string = combo->GetString(combo->GetSelection()).ToUTF8().data();
-    const std::string preset_name = wxGetApp().preset_bundle->get_preset_name_by_alias(preset_type, selected_string);
+    const std::string preset_name = wxGetApp().preset_bundle->get_preset_name_by_alias(preset_type, 
+        Preset::remove_suffix_modified(combo->GetString(combo->GetSelection()).ToUTF8().data()));
 
     if (preset_type == Preset::TYPE_FILAMENT) {
         wxGetApp().preset_bundle->set_filament_preset(idx, preset_name);
@@ -5770,6 +5738,7 @@ bool Plater::can_reload_from_disk() const { return p->can_reload_from_disk(); }
 const UndoRedo::Stack& Plater::undo_redo_stack_main() const { return p->undo_redo_stack_main(); }
 void Plater::enter_gizmos_stack() { p->enter_gizmos_stack(); }
 void Plater::leave_gizmos_stack() { p->leave_gizmos_stack(); }
+bool Plater::inside_snapshot_capture() { return p->inside_snapshot_capture(); }
 
 // Wrapper around wxWindow::PopupMenu to suppress error messages popping out while tracking the popup menu.
 bool Plater::PopupMenu(wxMenu *menu, const wxPoint& pos)
