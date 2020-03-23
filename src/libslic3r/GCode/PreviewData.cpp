@@ -63,16 +63,23 @@ void GCodePreviewData::Range::update_from(const RangeBase& other)
     max_val = std::max(max_val, other.max());
 }
 
-float GCodePreviewData::RangeBase::step_size() const
+float GCodePreviewData::RangeBase::step_size(bool geometric_scale) const
 {
-    return (max() - min()) / static_cast<float>(range_rainbow_colors.size() - 1);
+    if (geometric_scale)
+        return (log(max() / min()) / static_cast<float>(range_rainbow_colors.size() - 1));
+    else
+        return (max() - min()) / static_cast<float>(range_rainbow_colors.size() - 1);
 }
 
-Color GCodePreviewData::RangeBase::get_color_at(float value) const
+Color GCodePreviewData::RangeBase::get_color_at(float value, bool geometric_scale) const
 {
     // Input value scaled to the color range
-    float step = step_size();
-    const float global_t = (step != 0.0f) ? std::max(0.0f, value - min()) / step_size() : 0.0f; // lower limit of 0.0f
+    float step = step_size(geometric_scale);
+    float global_t;
+    if (geometric_scale)
+        global_t = (step != 0.0f) ? std::max(0.0f, log(value / min())) / step : 0.0f; // lower limit of 0.0f
+    else
+        global_t = (step != 0.0f) ? std::max(0.0f, value - min()) / step : 0.0f; // lower limit of 0.0f
 
     constexpr std::size_t color_max_idx = range_rainbow_colors.size() - 1;
 
@@ -286,6 +293,11 @@ Color GCodePreviewData::get_layer_time_color(float layer_time) const
     return ranges.layer_time.get_color_at(layer_time);
 }
 
+Color GCodePreviewData::get_layer_time_log_color(float layer_time) const
+{
+    return ranges.layer_time.get_color_at(layer_time, true);
+}
+
 Color GCodePreviewData::get_volumetric_rate_color(float rate) const
 {
     return ranges.volumetric_rate.get_color_at(rate);
@@ -361,6 +373,8 @@ std::string GCodePreviewData::get_legend_title() const
         return L("Fan Speed (%)");
     case Extrusion::LayerTime:
         return L("Layer Time");
+    case Extrusion::LayerTimeLog:
+        return L("Layer Time (log)");
     case Extrusion::VolumetricRate:
         return L("Volumetric flow rate (mm³/s)");
     case Extrusion::Tool:
@@ -391,11 +405,11 @@ GCodePreviewData::LegendItemsList GCodePreviewData::get_legend_items(const std::
             return buffer;
         }
         
-        static void FillListFromRange(LegendItemsList& list, const RangeBase& range, unsigned int decimals, float scale_factor, bool istime = false)
+        static void FillListFromRange(LegendItemsList& list, const RangeBase& range, unsigned int decimals, float scale_factor, bool istime = false, bool geometric_scale = false)
         {
             list.reserve(range_rainbow_colors.size());
 
-            float step = range.step_size();
+            float step = range.step_size(geometric_scale);
             if (step == 0.0f)
             {
                 char buf[1024];
@@ -407,10 +421,20 @@ GCodePreviewData::LegendItemsList GCodePreviewData::get_legend_items(const std::
                 for (int i = static_cast<int>(range_rainbow_colors.size()) - 1; i >= 0; --i)
                 {
                     char buf[1024];
-                    if (istime)
-                        sprintf(buf, "%s", _get_time_ms(scale_factor * (range.min() + (float)i * step)).c_str());
+                    if (geometric_scale)
+                    {
+                        if (istime)
+                            sprintf(buf, "%s", _get_time_ms(scale_factor * exp(log(range.min()) + (float)i * step)).c_str());
+                        else
+                            sprintf(buf, "%.*f", decimals, scale_factor * exp(log(range.min()) + (float)i * step));
+                    }
                     else
-                        sprintf(buf, "%.*f", decimals, scale_factor * (range.min() + (float)i * step));
+                    {
+                        if (istime)
+                            sprintf(buf, "%s", _get_time_ms(scale_factor * (range.min() + (float)i * step)).c_str());
+                        else
+                            sprintf(buf, "%.*f", decimals, scale_factor * (range.min() + (float)i * step));
+                     }
                     list.emplace_back(buf, range_rainbow_colors[i]);
                 }
             }
@@ -457,6 +481,11 @@ GCodePreviewData::LegendItemsList GCodePreviewData::get_legend_items(const std::
     case Extrusion::LayerTime:
     {
         Helper::FillListFromRange(items, ranges.layer_time, 1, 1.0f, true);
+        break;
+    }
+    case Extrusion::LayerTimeLog:
+    {
+        Helper::FillListFromRange(items, ranges.layer_time, 1, 1.0f, true, true);
         break;
     }
     case Extrusion::VolumetricRate:
