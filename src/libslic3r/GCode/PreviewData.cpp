@@ -66,7 +66,12 @@ void GCodePreviewData::Range::update_from(const RangeBase& other)
 float GCodePreviewData::RangeBase::step_size(bool geometric_scale) const
 {
     if (geometric_scale)
-        return (log(max() / min()) / static_cast<float>(range_rainbow_colors.size() - 1));
+    {
+        float min_range = min();
+        if (min_range == 0)
+            min_range = 0.001f;
+        return (log(max() / min_range) / static_cast<float>(range_rainbow_colors.size() - 1));
+    }
     else
         return (max() - min()) / static_cast<float>(range_rainbow_colors.size() - 1);
 }
@@ -77,7 +82,12 @@ Color GCodePreviewData::RangeBase::get_color_at(float value, bool geometric_scal
     float step = step_size(geometric_scale);
     float global_t;
     if (geometric_scale)
-        global_t = (step != 0.0f) ? std::max(0.0f, log(value / min())) / step : 0.0f; // lower limit of 0.0f
+    {
+        float min_range = min();
+        if (min_range == 0)
+            min_range = 0.001f;
+        global_t = (step != 0.0f) ? std::max(0.0f, log(value / min_range)) / step : 0.0f; // lower limit of 0.0f
+    }
     else
         global_t = (step != 0.0f) ? std::max(0.0f, value - min()) / step : 0.0f; // lower limit of 0.0f
 
@@ -423,10 +433,13 @@ GCodePreviewData::LegendItemsList GCodePreviewData::get_legend_items(const std::
                     char buf[1024];
                     if (geometric_scale)
                     {
+                        float min_range = range.min();
+                        if (min_range == 0)
+                            min_range = 0.001f;
                         if (istime)
-                            sprintf(buf, "%s", _get_time_ms(scale_factor * exp(log(range.min()) + (float)i * step)).c_str());
+                            sprintf(buf, "%s", _get_time_ms(scale_factor * exp(log(min_range) + (float)i * step)).c_str());
                         else
-                            sprintf(buf, "%.*f", decimals, scale_factor * exp(log(range.min()) + (float)i * step));
+                            sprintf(buf, "%.*f", decimals, scale_factor * exp(log(min_range) + (float)i * step));
                     }
                     else
                     {
