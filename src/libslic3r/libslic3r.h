@@ -17,11 +17,19 @@
 #include <vector>
 #include <cassert>
 #include <cmath>
+#include <type_traits>
 
 #include "Technologies.hpp"
 #include "Semver.hpp"
 
+#if 1
+// Saves around 32% RAM after slicing step, 6.7% after G-code export (tested on PrusaSlicer 2.2.0 final).
 typedef int32_t coord_t;
+#else
+//FIXME At least FillRectilinear2 requires coord_t to be 32bit.
+typedef int64_t coord_t;
+#endif
+
 typedef double  coordf_t;
 
 //FIXME This epsilon value is used for many non-related purposes:
@@ -33,6 +41,7 @@ typedef double  coordf_t;
 // This scaling generates a following fixed point representation with for a 32bit integer:
 // 0..4294mm with 1nm resolution
 // int32_t fits an interval of (-2147.48mm, +2147.48mm)
+// with int64_t we don't have to worry anymore about the size of the int.
 #define SCALING_FACTOR 0.000001
 // RESOLUTION, SCALED_RESOLUTION: Used as an error threshold for a Douglas-Peucker polyline simplification algorithm.
 #define RESOLUTION 0.0125
@@ -239,6 +248,37 @@ static inline bool is_approx(Number value, Number test_value)
 {
     return std::fabs(double(value) - double(test_value)) < double(EPSILON);
 }
+
+// A meta-predicate which is true for integers wider than or equal to coord_t
+template<class I> struct is_scaled_coord
+{
+    static const constexpr bool value =
+        std::is_integral<I>::value &&
+        std::numeric_limits<I>::digits >=
+            std::numeric_limits<coord_t>::digits;
+};
+
+// Meta predicates for floating, 'scaled coord' and generic arithmetic types
+// Can be used to restrict templates to work for only the specified set of types.
+// parameter T is the type we want to restrict
+// parameter O (Optional defaults to T) is the type that the whole expression
+// will be evaluated to.
+// e.g. template<class T> FloatingOnly<T, bool> is_nan(T val);
+// The whole template will be defined only for floating point types and the
+// return type will be bool.
+// For more info how to use, see docs for std::enable_if
+//
+template<class T, class O = T> 
+using FloatingOnly = std::enable_if_t<std::is_floating_point<T>::value, O>;
+
+template<class T, class O = T>
+using ScaledCoordOnly = std::enable_if_t<is_scaled_coord<T>::value, O>;
+
+template<class T, class O = T>
+using IntegerOnly = std::enable_if_t<std::is_integral<T>::value, O>;
+
+template<class T, class O = T>
+using ArithmeticOnly = std::enable_if_t<std::is_arithmetic<T>::value, O>;
 
 } // namespace Slic3r
 

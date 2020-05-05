@@ -2,8 +2,9 @@
 #include "I18N.hpp"
 
 #include "libslic3r/Utils.hpp"
+#include "GUI.hpp"
 #include "GUI_App.hpp"
-#include "wxExtensions.hpp"
+
 
 namespace Slic3r { 
 namespace GUI {
@@ -114,7 +115,9 @@ void CopyrightsDialog::fill_entries()
         { "Icons for STL and GCODE files."
                             , "Akira Yasuda"                                , "http://3dp0.com/icons-for-stl-and-gcode/" },
         { "AppImage packaging for Linux using AppImageKit"
-                            , "2004-2019 Simon Peter and contributors"      , "https://appimage.org/" }
+                            , "2004-2019 Simon Peter and contributors"      , "https://appimage.org/" },
+        { "lib_fts"
+                            , "Forrest Smith"                               , "https://www.forrestthewoods.com/" }
     };
 }
 

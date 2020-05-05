@@ -3,25 +3,27 @@
 
 #include <stddef.h>
 #include <memory>
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 #include <chrono>
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 
 #include "3DScene.hpp"
 #include "GLToolbar.hpp"
+#include "GLShader.hpp"
 #include "Event.hpp"
-#include "3DBed.hpp"
-#include "Camera.hpp"
 #include "Selection.hpp"
 #include "Gizmos/GLGizmosManager.hpp"
 #include "GUI_ObjectLayers.hpp"
+#include "GLSelectionRectangle.hpp"
 #include "MeshUtils.hpp"
+#if !ENABLE_NON_STATIC_CANVAS_MANAGER
+#include "Camera.hpp"
+#endif // !ENABLE_NON_STATIC_CANVAS_MANAGER
 
 #include <float.h>
 
 #include <wx/timer.h>
 
-class wxWindow;
 class wxSizeEvent;
 class wxIdleEvent;
 class wxKeyEvent;
@@ -29,25 +31,24 @@ class wxMouseEvent;
 class wxTimerEvent;
 class wxPaintEvent;
 class wxGLCanvas;
+#if ENABLE_NON_STATIC_CANVAS_MANAGER
+class wxGLContext;
+#endif // ENABLE_NON_STATIC_CANVAS_MANAGER
 
 // Support for Retina OpenGL on Mac OS
 #define ENABLE_RETINA_GL __APPLE__
 
 namespace Slic3r {
 
-class GLShader;
-class ExPolygon;
+class Bed3D;
+struct Camera;
 class BackgroundSlicingProcess;
 class GCodePreviewData;
-#if ENABLE_THUMBNAIL_GENERATOR
 struct ThumbnailData;
-#endif // ENABLE_THUMBNAIL_GENERATOR
 struct SlicingParameters;
 enum LayerHeightEditActionType : unsigned int;
 
 namespace GUI {
-
-class GLGizmoBase;
 
 #if ENABLE_RETINA_GL
 class RetinaHelper;
@@ -109,6 +110,7 @@ wxDECLARE_EVENT(EVT_GLCANVAS_MOVE_DOUBLE_SLIDER, wxKeyEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_EDIT_COLOR_CHANGE, wxKeyEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_UNDO, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_REDO, SimpleEvent);
+wxDECLARE_EVENT(EVT_GLCANVAS_COLLAPSE_SIDEBAR, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_RESET_LAYER_HEIGHT_PROFILE, SimpleEvent);
 wxDECLARE_EVENT(EVT_GLCANVAS_ADAPTIVE_LAYER_HEIGHT_PROFILE, Event<float>);
 wxDECLARE_EVENT(EVT_GLCANVAS_SMOOTH_LAYER_HEIGHT_PROFILE, HeightProfileSmoothEvent);
@@ -116,9 +118,7 @@ wxDECLARE_EVENT(EVT_GLCANVAS_RELOAD_FROM_DISK, SimpleEvent);
 
 class GLCanvas3D
 {
-#if ENABLE_THUMBNAIL_GENERATOR
     static const double DefaultCameraZoomToBoxMarginFactor;
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
 public:
     struct GCodePreviewVolumeIndex
@@ -160,8 +160,8 @@ private:
             Num_States
         };
 
-    private:
         static const float THICKNESS_BAR_WIDTH;
+    private:
 
         bool                        m_enabled;
         Shader                      m_shader;
@@ -396,25 +396,37 @@ private:
     class Tooltip
     {
         std::string m_text;
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
         std::chrono::steady_clock::time_point m_start_time;
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
         // Indicator that the mouse is inside an ImGUI dialog, therefore the tooltip should be suppressed.
-        bool 		m_in_imgui = false;
+        bool m_in_imgui = false;
 
     public:
         bool is_empty() const { return m_text.empty(); }
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
         void set_text(const std::string& text);
         void render(const Vec2d& mouse_position, GLCanvas3D& canvas) const;
-#else
-        void set_text(const std::string& text) { m_text = text; }
-        void render(const Vec2d& mouse_position) const;
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
         // Indicates that the mouse is inside an ImGUI dialog, therefore the tooltip should be suppressed.
         void set_in_imgui(bool b) { m_in_imgui = b; }
+        bool is_in_imgui() const { return m_in_imgui; }
     };
 #endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+
+#if ENABLE_SLOPE_RENDERING
+    class Slope
+    {
+        bool m_enabled{ false };
+        GLCanvas3D& m_canvas;
+        GLVolumeCollection& m_volumes;
+
+    public:
+        Slope(GLCanvas3D& canvas, GLVolumeCollection& volumes) : m_canvas(canvas), m_volumes(volumes) {}
+
+        void enable(bool enable) { m_enabled = enable; }
+        bool is_enabled() const { return m_enabled; }
+        void show(bool show) { m_volumes.set_slope_active(m_enabled ? show : false); }
+        bool is_shown() const { return m_volumes.is_slope_active(); }
+        void render() const;
+    };
+#endif // ENABLE_SLOPE_RENDERING
 
 public:
     enum ECursorType : unsigned char
@@ -433,15 +445,18 @@ private:
     LegendTexture m_legend_texture;
     WarningTexture m_warning_texture;
     wxTimer m_timer;
+#if !ENABLE_NON_STATIC_CANVAS_MANAGER
     Bed3D& m_bed;
     Camera& m_camera;
     GLToolbar& m_view_toolbar;
+#endif // !ENABLE_NON_STATIC_CANVAS_MANAGER
     LayersEditing m_layers_editing;
     Shader m_shader;
     Mouse m_mouse;
     mutable GLGizmosManager m_gizmos;
     mutable GLToolbar m_main_toolbar;
     mutable GLToolbar m_undoredo_toolbar;
+    mutable GLToolbar m_collapse_toolbar;
     ClippingPlane m_clipping_planes[2];
     mutable ClippingPlane m_camera_clipping_plane;
     bool m_use_clipping_planes;
@@ -491,16 +506,28 @@ private:
 #endif // ENABLE_RENDER_STATISTICS
 
     mutable int m_imgui_undo_redo_hovered_pos{ -1 };
+    mutable int m_mouse_wheel {0};
     int m_selected_extruder;
 
     Labels m_labels;
 #if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     mutable Tooltip m_tooltip;
 #endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+#if ENABLE_SLOPE_RENDERING
+    Slope m_slope;
+#endif // ENABLE_SLOPE_RENDERING
 
 public:
+#if ENABLE_NON_STATIC_CANVAS_MANAGER
+    explicit GLCanvas3D(wxGLCanvas* canvas);
+#else
     GLCanvas3D(wxGLCanvas* canvas, Bed3D& bed, Camera& camera, GLToolbar& view_toolbar);
+#endif // ENABLE_NON_STATIC_CANVAS_MANAGER
     ~GLCanvas3D();
+
+#if ENABLE_NON_STATIC_CANVAS_MANAGER
+    bool is_initialized() const { return m_initialized; }
+#endif // ENABLE_NON_STATIC_CANVAS_MANAGER
 
     void set_context(wxGLContext* context) { m_context = context; }
 
@@ -548,9 +575,14 @@ public:
 
     void set_color_by(const std::string& value);
 
+#if ENABLE_NON_STATIC_CANVAS_MANAGER
+    void refresh_camera_scene_box();
+#else
+    void refresh_camera_scene_box() { m_camera.set_scene_box(scene_bounding_box()); }
     const Camera& get_camera() const { return m_camera; }
-    const Shader& get_shader() const { return m_shader; }
     Camera& get_camera() { return m_camera; }
+#endif // ENABLE_NON_STATIC_CANVAS_MANAGER
+    const Shader& get_shader() const { return m_shader; }
 
     BoundingBoxf3 volumes_bounding_box() const;
     BoundingBoxf3 scene_bounding_box() const;
@@ -572,8 +604,12 @@ public:
     void enable_selection(bool enable);
     void enable_main_toolbar(bool enable);
     void enable_undoredo_toolbar(bool enable);
+    void enable_collapse_toolbar(bool enable);
     void enable_dynamic_background(bool enable);
     void enable_labels(bool enable) { m_labels.enable(enable); }
+#if ENABLE_SLOPE_RENDERING
+    void enable_slope(bool enable) { m_slope.enable(enable); }
+#endif // ENABLE_SLOPE_RENDERING
     void allow_multisample(bool allow);
 
     void zoom_to_bed();
@@ -586,11 +622,9 @@ public:
     bool is_dragging() const { return m_gizmos.is_dragging() || m_moving; }
 
     void render();
-#if ENABLE_THUMBNAIL_GENERATOR
     // printable_only == false -> render also non printable volumes as grayed
     // parts_only == false -> render also sla support and pad
     void render_thumbnail(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, bool printable_only, bool parts_only, bool show_bed, bool transparent_background) const;
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
     void select_all();
     void deselect_all();
@@ -644,7 +678,9 @@ public:
 
     void update_ui_from_settings();
 
+#if !ENABLE_NON_STATIC_CANVAS_MANAGER
     float get_view_toolbar_height() const { return m_view_toolbar.get_height(); }
+#endif // !ENABLE_NON_STATIC_CANVAS_MANAGER
 
     int get_move_volume_id() const { return m_mouse.drag.move_volume_idx; }
     int get_first_hover_volume_idx() const { return m_hover_volume_idxs.empty() ? -1 : m_hover_volume_idxs.front(); }
@@ -676,7 +712,6 @@ public:
     Linef3 mouse_ray(const Point& mouse_pos);
 
     void set_mouse_as_dragging() { m_mouse.dragging = true; }
-    void refresh_camera_scene_box() { m_camera.set_scene_box(scene_bounding_box()); }
     bool is_mouse_dragging() const { return m_mouse.dragging; }
 
     double get_size_proportional_to_max_bed_size(double factor) const;
@@ -698,6 +733,11 @@ public:
     bool are_labels_shown() const { return m_labels.is_shown(); }
     void show_labels(bool show) { m_labels.show(show); }
 
+#if ENABLE_SLOPE_RENDERING
+    bool is_slope_shown() const { return m_slope.is_shown(); }
+    void show_slope(bool show) { m_slope.show(show); }
+#endif // ENABLE_SLOPE_RENDERING
+
 private:
     bool _is_shown_on_screen() const;
 
@@ -705,17 +745,14 @@ private:
     bool _init_main_toolbar();
     bool _init_undoredo_toolbar();
     bool _init_view_toolbar();
+    bool _init_collapse_toolbar();
 
     bool _set_current();
     void _resize(unsigned int w, unsigned int h);
 
     BoundingBoxf3 _max_bounding_box(bool include_gizmos, bool include_bed_model) const;
 
-#if ENABLE_THUMBNAIL_GENERATOR
     void _zoom_to_box(const BoundingBoxf3& box, double margin_factor = DefaultCameraZoomToBoxMarginFactor);
-#else
-    void _zoom_to_box(const BoundingBoxf3& box);
-#endif // ENABLE_THUMBNAIL_GENERATOR
     void _update_camera_zoom(double zoom);
 
     void _refresh_if_shown_on_screen();
@@ -723,7 +760,7 @@ private:
     void _picking_pass() const;
     void _rectangular_selection_picking_pass() const;
     void _render_background() const;
-    void _render_bed(float theta, bool show_axes) const;
+    void _render_bed(bool bottom, bool show_axes) const;
     void _render_objects() const;
     void _render_selection() const;
 #if ENABLE_RENDER_SELECTION_CENTER
@@ -737,14 +774,15 @@ private:
     void _render_gizmos_overlay() const;
     void _render_main_toolbar() const;
     void _render_undoredo_toolbar() const;
+    void _render_collapse_toolbar() const;
     void _render_view_toolbar() const;
 #if ENABLE_SHOW_CAMERA_TARGET
     void _render_camera_target() const;
 #endif // ENABLE_SHOW_CAMERA_TARGET
     void _render_sla_slices() const;
     void _render_selection_sidebar_hints() const;
-    void _render_undo_redo_stack(const bool is_undo, float pos_x) const;
-#if ENABLE_THUMBNAIL_GENERATOR
+    bool _render_undo_redo_stack(const bool is_undo, float pos_x) const;
+    bool _render_search_list(float pos_x) const;
     void _render_thumbnail_internal(ThumbnailData& thumbnail_data, bool printable_only, bool parts_only, bool show_bed, bool transparent_background) const;
     // render thumbnail using an off-screen framebuffer
     void _render_thumbnail_framebuffer(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, bool printable_only, bool parts_only, bool show_bed, bool transparent_background) const;
@@ -752,7 +790,6 @@ private:
     void _render_thumbnail_framebuffer_ext(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, bool printable_only, bool parts_only, bool show_bed, bool transparent_background) const;
     // render thumbnail using the default framebuffer
     void _render_thumbnail_legacy(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, bool printable_only, bool parts_only, bool show_bed, bool transparent_background) const;
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
     void _update_volumes_hover_state() const;
 
@@ -805,6 +842,9 @@ private:
     void _update_selection_from_hover();
 
     bool _deactivate_undo_redo_toolbar_items();
+    bool _deactivate_search_toolbar_item();
+    bool _activate_search_toolbar_item();
+    bool _deactivate_collapse_toolbar_items();
 
     static std::vector<float> _parse_colors(const std::vector<std::string>& colors);
 

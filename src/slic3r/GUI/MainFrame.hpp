@@ -86,6 +86,7 @@ class MainFrame : public DPIFrame
         miExport = 0,   // Export G-code        Export
         miSend,         // Send G-code          Send to print
         miMaterialTab,  // Filament Settings    Material Settings
+        miPrinterTab,   // Different bitmap for Printer Settings
     };
 
     // vector of a MenuBar items changeable in respect to printer technology 
@@ -108,6 +109,7 @@ public:
     void        update_title();
 
     void        init_tabpanel();
+    void        switch_to(bool plater);
     void        create_preset_tabs();
     void        add_created_tab(Tab* panel);
     void        init_menubar();
@@ -128,7 +130,7 @@ public:
     void        export_configbundle();
     void        load_configbundle(wxString file = wxEmptyString);
     void        load_config(const DynamicPrintConfig& config);
-    void        select_tab(size_t tab) const;
+    void        select_tab(size_t tab);
     void        select_view(const std::string& direction);
     // Propagate changed configuration from the Tab to the Plater and save changes to the AppConfig
     void        on_config_changed(DynamicPrintConfig* cfg) const ;
@@ -144,6 +146,8 @@ public:
 
 #ifdef _WIN32
     void*				m_hDeviceNotify { nullptr };
+    uint32_t  			m_ulSHChangeNotifyRegister { 0 };
+	static constexpr int WM_USER_MEDIACHANGED { 0x7FFF }; // WM_USER from 0x0400 to 0x7FFF, picking the last one to not interfere with wxWidgets allocation
 #endif // _WIN32
 };
 

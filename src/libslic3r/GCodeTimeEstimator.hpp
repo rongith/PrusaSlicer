@@ -85,7 +85,6 @@ namespace Slic3r {
             // hard limit for the acceleration, to which the firmware will clamp.
             float max_acceleration;             // mm/s^2
             float retract_acceleration;         // mm/s^2
-            float additional_time;              // s
             float minimum_feedrate;             // mm/s
             float minimum_travel_feedrate;      // mm/s
             float extrude_factor_override_percentage;
@@ -93,7 +92,7 @@ namespace Slic3r {
             std::vector<float> filament_load_times;
             std::vector<float> filament_unload_times;
             unsigned int g1_line_id;
-            // extruder_id is currently used to correctly calculate filament load / unload times 
+            // extruder_id is currently used to correctly calculate filament load / unload times
             // into the total print time. This is currently only really used by the MK3 MMU2:
             // Extruder id (-1) means no filament is loaded yet, all the filaments are parked in the MK3 MMU2 unit.
             static const unsigned int extruder_id_unloaded = (unsigned int)-1;
@@ -125,14 +124,13 @@ namespace Slic3r {
 
             struct Trapezoid
             {
-                float distance;         // mm
                 float accelerate_until; // mm
                 float decelerate_after; // mm
-                FeedrateProfile feedrate;
+                float cruise_feedrate; // mm/sec
 
-                float acceleration_time(float acceleration) const;
+                float acceleration_time(float entry_feedrate, float acceleration) const;
                 float cruise_time() const;
-                float deceleration_time(float acceleration) const;
+                float deceleration_time(float distance, float acceleration) const;
                 float cruise_distance() const;
 
                 // This function gives the time needed to accelerate from an initial speed to reach a final distance.
@@ -155,6 +153,7 @@ namespace Slic3r {
 
             float delta_pos[Num_Axis]; // mm
             float z;
+            float distance; // mm
             float acceleration;        // mm/s^2
             float max_entry_speed;     // mm/s
             float safe_feedrate;       // mm/s
@@ -164,16 +163,8 @@ namespace Slic3r {
             float elapsed_time;
             float time;
 
-            Block();
-
-            // Returns the length of the move covered by this block, in mm
-            float move_length() const;
-
-            // Returns true if this block is a retract/unretract move only
-            float is_extruder_only_move() const;
-
-            // Returns true if this block is a move with no extrusion
-            float is_travel_move() const;
+            // Ordnary index of this G1 line in the file.
+            int   g1_line_id { -1 };
 
             // Returns the time spent accelerating toward cruise speed, in seconds
             float acceleration_time() const;
@@ -190,14 +181,14 @@ namespace Slic3r {
             // Calculates this block's trapezoid
             void calculate_trapezoid();
 
-            // Calculates the maximum allowable speed at this point when you must be able to reach target_velocity using the 
+            // Calculates the maximum allowable speed at this point when you must be able to reach target_velocity using the
             // acceleration within the allotted distance.
             static float max_allowable_speed(float acceleration, float target_velocity, float distance);
 
             // Calculates the distance (not time) it takes to accelerate from initial_rate to target_rate using the given acceleration:
             static float estimate_acceleration_distance(float initial_rate, float target_rate, float acceleration);
 
-            // This function gives you the point at which you must start braking (at the rate of -acceleration) if 
+            // This function gives you the point at which you must start braking (at the rate of -acceleration) if
             // you started at speed initial_rate and accelerated until this point and want to end at the final_rate after
             // a total travel of distance. This can be used to compute the intersection point between acceleration and
             // deceleration in the cases where the trapezoid has no plateau (i.e. never reaches maximum speed)
@@ -227,16 +218,13 @@ namespace Slic3r {
 #endif // ENABLE_MOVE_STATS
 
     public:
-        typedef std::pair<unsigned int, unsigned int> G1LineIdToBlockId;
-        typedef std::vector<G1LineIdToBlockId> G1LineIdToBlockIdMap;
+        typedef std::pair<int, float> G1LineIdTime;
+        typedef std::vector<G1LineIdTime> G1LineIdsTimes;
 
         struct PostProcessData
         {
-            const G1LineIdToBlockIdMap& g1_line_ids;
-            const BlocksList& blocks;
+            const G1LineIdsTimes& g1_times;
             float time;
-
-            PostProcessData(const G1LineIdToBlockIdMap& g1_line_ids, const BlocksList& blocks, float time) : g1_line_ids(g1_line_ids), blocks(blocks), time(time) {}
         };
 
     private:
@@ -251,6 +239,14 @@ namespace Slic3r {
         G1LineIdToBlockIdMap m_g1_line_ids;
         // Index of the last block already st_synchronized
         int m_last_st_synchronized_block_id;
+        // Size of the firmware planner queue. The old 8-bit Marlins usually just managed 16 trapezoidal blocks.
+        // Let's be conservative and plan for newer boards with more memory.
+        static constexpr size_t planner_queue_size = 64;
+        // The firmware recalculates last planner_queue_size trapezoidal blocks each time a new block is added.
+        // We are not simulating the firmware exactly, we calculate a sequence of blocks once a reasonable number of blocks accumulate.
+        static constexpr size_t planner_refresh_if_larger = planner_queue_size * 4;
+        // Map from g1 line id to its elapsed time from the start of the print.
+        G1LineIdsTimes m_g1_times;
         float m_time; // s
 
         // data to calculate custom code times
@@ -278,15 +274,15 @@ namespace Slic3r {
         void calculate_time(bool start_from_beginning);
 
         // Calculates the time estimate from the given gcode in string format
-        void calculate_time_from_text(const std::string& gcode);
+        //void calculate_time_from_text(const std::string& gcode);
 
         // Calculates the time estimate from the gcode contained in the file with the given filename
-        void calculate_time_from_file(const std::string& file);
+        //void calculate_time_from_file(const std::string& file);
 
         // Calculates the time estimate from the gcode contained in given list of gcode lines
-        void calculate_time_from_lines(const std::vector<std::string>& gcode_lines);
+        //void calculate_time_from_lines(const std::vector<std::string>& gcode_lines);
 
-        // Process the gcode contained in the file with the given filename, 
+        // Process the gcode contained in the file with the given filename,
         // replacing placeholders with correspondent new lines M73
         // placing new lines M73 (containing the remaining time) where needed (in dependence of the given interval in seconds)
         // and removing working tags (as those used for color changes)
@@ -404,7 +400,7 @@ namespace Slic3r {
         // Return an estimate of the memory consumed by the time estimator.
         size_t memory_used() const;
 
-        PostProcessData get_post_process_data() const { return PostProcessData(m_g1_line_ids, m_blocks, m_time); }
+        PostProcessData get_post_process_data() const { return PostProcessData{ m_g1_times, m_time }; }
 
     private:
         void _reset();
@@ -412,7 +408,7 @@ namespace Slic3r {
         void _reset_blocks();
 
         // Calculates the time estimate
-        void _calculate_time();
+        void _calculate_time(size_t keep_last_n_blocks);
 
         // Processes the given gcode line
         void _process_gcode_line(GCodeReader&, const GCodeReader::GCodeLine& line);
@@ -485,7 +481,7 @@ namespace Slic3r {
         void _process_custom_gcode_tag(CustomGcodeType code);
 
         // Simulates firmware st_synchronize() call
-        void _simulate_st_synchronize();
+        void _simulate_st_synchronize(float additional_time);
 
         void _forward_pass();
         void _reverse_pass();
