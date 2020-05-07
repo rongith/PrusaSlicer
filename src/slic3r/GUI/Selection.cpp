@@ -440,6 +440,10 @@ void Selection::clear()
     update_type();
     this->set_bounding_boxes_dirty();
 
+    // this happens while the application is closing
+    if (wxGetApp().obj_manipul() == nullptr)
+        return;
+
     // resets the cache in the sidebar
     wxGetApp().obj_manipul()->reset_cache();
 

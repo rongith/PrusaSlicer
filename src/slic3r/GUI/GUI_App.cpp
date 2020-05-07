@@ -24,6 +24,7 @@
 #include <wx/filefn.h>
 #include <wx/sysopt.h>
 #include <wx/msgdlg.h>
+#include <wx/richmsgdlg.h>
 #include <wx/log.h>
 #include <wx/intl.h>
 
@@ -47,11 +48,13 @@
 #include "SysInfoDialog.hpp"
 #include "KBShortcutsDialog.hpp"
 #include "UpdateDialogs.hpp"
+#include "Mouse3DController.hpp"
 #include "RemovableDriveManager.hpp"
+#include "InstanceCheck.hpp"
 
 #ifdef __WXMSW__
-#include <Shlobj.h>
 #include <dbt.h>
+#include <shlobj.h>
 #endif // __WXMSW__
 
 #if ENABLE_THUMBNAIL_GENERATOR_DEBUG
@@ -158,6 +161,66 @@ static void register_win32_device_notification_event()
         }
         return true;
     });
+
+    wxWindow::MSWRegisterMessageHandler(MainFrame::WM_USER_MEDIACHANGED, [](wxWindow *win, WXUINT /* nMsg */, WXWPARAM wParam, WXLPARAM lParam) {
+        // Some messages are sent to top level windows by default, some messages are sent to only registered windows, and we explictely register on MainFrame only.
+        auto main_frame = dynamic_cast<MainFrame*>(win);
+        auto plater = (main_frame == nullptr) ? nullptr : main_frame->plater();
+        if (plater == nullptr)
+            // Maybe some other top level window like a dialog or maybe a pop-up menu?
+            return true;
+        wchar_t sPath[MAX_PATH];
+        if (lParam == SHCNE_MEDIAINSERTED || lParam == SHCNE_MEDIAREMOVED) {
+            struct _ITEMIDLIST* pidl = *reinterpret_cast<struct _ITEMIDLIST**>(wParam);
+            if (! SHGetPathFromIDList(pidl, sPath)) {
+                BOOST_LOG_TRIVIAL(error) << "MediaInserted: SHGetPathFromIDList failed";
+                return false;
+            }
+        }
+        switch (lParam) {
+        case SHCNE_MEDIAINSERTED:
+        {
+            //printf("SHCNE_MEDIAINSERTED %S\n", sPath);
+            plater->GetEventHandler()->AddPendingEvent(VolumeAttachedEvent(EVT_VOLUME_ATTACHED));
+            break;
+        }
+        case SHCNE_MEDIAREMOVED:
+        {
+            //printf("SHCNE_MEDIAREMOVED %S\n", sPath);
+            plater->GetEventHandler()->AddPendingEvent(VolumeDetachedEvent(EVT_VOLUME_DETACHED));
+            break;
+        }
+	    default:
+//          printf("Unknown\n");
+            break;
+	    }
+        return true;
+    });
+
+    wxWindow::MSWRegisterMessageHandler(WM_INPUT, [](wxWindow *win, WXUINT /* nMsg */, WXWPARAM wParam, WXLPARAM lParam) {
+        auto main_frame = dynamic_cast<MainFrame*>(Slic3r::GUI::find_toplevel_parent(win));
+        auto plater = (main_frame == nullptr) ? nullptr : main_frame->plater();
+//        if (wParam == RIM_INPUTSINK && plater != nullptr && main_frame->IsActive()) {
+        if (wParam == RIM_INPUT && plater != nullptr && main_frame->IsActive()) {
+        RAWINPUT raw;
+			UINT rawSize = sizeof(RAWINPUT);
+			::GetRawInputData((HRAWINPUT)lParam, RID_INPUT, &raw, &rawSize, sizeof(RAWINPUTHEADER));
+			if (raw.header.dwType == RIM_TYPEHID && plater->get_mouse3d_controller().handle_raw_input_win32(raw.data.hid.bRawData, raw.data.hid.dwSizeHid))
+				return true;
+		}
+        return false;
+    });
+
+	wxWindow::MSWRegisterMessageHandler(WM_COPYDATA, [](wxWindow* win, WXUINT /* nMsg */, WXWPARAM wParam, WXLPARAM lParam) {
+
+		COPYDATASTRUCT* copy_data_structure = { 0 };
+		copy_data_structure = (COPYDATASTRUCT*)lParam;
+		if (copy_data_structure->dwData == 1) {
+			LPCWSTR arguments = (LPCWSTR)copy_data_structure->lpData;
+			Slic3r::GUI::wxGetApp().other_instance_message_handler()->handle_message(boost::nowide::narrow(arguments));
+		}
+		return true;
+		});
 }
 #endif // WIN32
 
@@ -202,7 +265,11 @@ GUI_App::GUI_App()
     , m_imgui(new ImGuiWrapper())
     , m_wizard(nullptr)
 	, m_removable_drive_manager(std::make_unique<RemovableDriveManager>())
-{}
+	, m_other_instance_message_handler(std::make_unique<OtherInstanceMessageHandler>())
+{
+	//app config initializes early becasuse it is used in instance checking in PrusaSlicer.cpp
+	this->init_app_config();
+}
 
 GUI_App::~GUI_App()
 {
@@ -214,6 +281,46 @@ GUI_App::~GUI_App()
 
     if (preset_updater != nullptr)
         delete preset_updater;
+}
+
+std::string GUI_App::get_gl_info(bool format_as_html, bool extensions)
+{
+    return OpenGLManager::get_gl_info().to_string(format_as_html, extensions);
+}
+
+wxGLContext* GUI_App::init_glcontext(wxGLCanvas& canvas)
+{
+    return m_opengl_mgr.init_glcontext(canvas);
+}
+
+bool GUI_App::init_opengl()
+{
+    return m_opengl_mgr.init_gl();
+}
+
+void GUI_App::init_app_config()
+{
+	// Profiles for the alpha are stored into the PrusaSlicer-alpha directory to not mix with the current release.
+	SetAppName(SLIC3R_APP_KEY);
+	SetAppName(SLIC3R_APP_KEY "-alpha");
+//	SetAppDisplayName(SLIC3R_APP_NAME);
+
+	// Set the Slic3r data directory at the Slic3r XS module.
+	// Unix: ~/ .Slic3r
+	// Windows : "C:\Users\username\AppData\Roaming\Slic3r" or "C:\Documents and Settings\username\Application Data\Slic3r"
+	// Mac : "~/Library/Application Support/Slic3r"
+
+	if (data_dir().empty())
+		set_data_dir(wxStandardPaths::Get().GetUserDataDir().ToUTF8().data());
+
+	if (!app_config)
+		app_config = new AppConfig();
+
+	// load settings
+	app_conf_exists = app_config->exists();
+	if (app_conf_exists) {
+		app_config->load();
+	}
 }
 
 bool GUI_App::OnInit()
@@ -233,41 +340,40 @@ bool GUI_App::on_init_inner()
     wxCHECK_MSG(wxDirExists(resources_dir), false,
         wxString::Format("Resources path does not exist or is not a directory: %s", resources_dir));
 
-    // Profiles for the alpha are stored into the PrusaSlicer-alpha directory to not mix with the current release.
-    SetAppName(SLIC3R_APP_KEY);
-//    SetAppName(SLIC3R_APP_KEY "-beta");
-    SetAppDisplayName(SLIC3R_APP_NAME);
-
-// Enable this to get the default Win32 COMCTRL32 behavior of static boxes.
+     // Enable this to get the default Win32 COMCTRL32 behavior of static boxes.
 //    wxSystemOptions::SetOption("msw.staticbox.optimized-paint", 0);
-// Enable this to disable Windows Vista themes for all wxNotebooks. The themes seem to lead to terrible
-// performance when working on high resolution multi-display setups.
+    // Enable this to disable Windows Vista themes for all wxNotebooks. The themes seem to lead to terrible
+    // performance when working on high resolution multi-display setups.
 //    wxSystemOptions::SetOption("msw.notebook.themed-background", 0);
 
 //     Slic3r::debugf "wxWidgets version %s, Wx version %s\n", wxVERSION_STRING, wxVERSION;
+   
+    std::string msg = Http::tls_global_init();
+    std::string ssl_cert_store = app_config->get("tls_accepted_cert_store_location");
+    bool ssl_accept = app_config->get("tls_cert_store_accepted") == "yes" && ssl_cert_store == Http::tls_system_cert_store();
+    
+    if (!msg.empty() && !ssl_accept) {
+        wxRichMessageDialog
+            dlg(nullptr,
+                wxString::Format(_(L("%s\nDo you want to continue?")), msg),
+                "PrusaSlicer", wxICON_QUESTION | wxYES_NO);
+        dlg.ShowCheckBox(_(L("Remember my choice")));
+        if (dlg.ShowModal() != wxID_YES) return false;
 
-    // Set the Slic3r data directory at the Slic3r XS module.
-    // Unix: ~/ .Slic3r
-    // Windows : "C:\Users\username\AppData\Roaming\Slic3r" or "C:\Documents and Settings\username\Application Data\Slic3r"
-    // Mac : "~/Library/Application Support/Slic3r"
-    if (data_dir().empty())
-        set_data_dir(wxStandardPaths::Get().GetUserDataDir().ToUTF8().data());
-
-    app_config = new AppConfig();
+        app_config->set("tls_cert_store_accepted",
+                        dlg.IsCheckBoxChecked() ? "yes" : "no");
+        app_config->set("tls_accepted_cert_store_location",
+                        dlg.IsCheckBoxChecked() ? Http::tls_system_cert_store() : "");
+    }
+    
+    app_config->set("version", SLIC3R_VERSION);
+    app_config->save();
+    
     preset_bundle = new PresetBundle();
-
+    
     // just checking for existence of Slic3r::data_dir is not enough : it may be an empty directory
     // supplied as argument to --datadir; in that case we should still run the wizard
     preset_bundle->setup_directories();
-
-    // load settings
-    app_conf_exists = app_config->exists();
-    if (app_conf_exists) {
-        app_config->load();
-    }
-
-    app_config->set("version", SLIC3R_VERSION);
-    app_config->save();
 
 #ifdef __WXMSW__
     associate_3mf_files();
@@ -306,6 +412,9 @@ bool GUI_App::on_init_inner()
     if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr)
         wxImage::AddHandler(new wxPNGHandler());
     mainframe = new MainFrame();
+    // hide settings tabs after first Layout
+    mainframe->select_tab(0);
+
     sidebar().obj_list()->init_objects(); // propagate model objects to object list
 //     update_mode(); // !!! do that later
     SetTopWindow(mainframe);
@@ -317,6 +426,8 @@ bool GUI_App::on_init_inner()
     {
         if (! plater_)
             return;
+
+		//m_other_instance_message_handler->report();
 
         if (app_config->dirty() && app_config->get("autosave") == "1")
             app_config->save();
@@ -491,6 +602,8 @@ void GUI_App::recreate_GUI()
 
     MainFrame *old_main_frame = mainframe;
     mainframe = new MainFrame();
+    // hide settings tabs after first Layout
+    mainframe->select_tab(0);
     // Propagate model objects to object list.
     sidebar().obj_list()->init_objects();
     SetTopWindow(mainframe);
@@ -594,6 +707,12 @@ void GUI_App::load_project(wxWindow *parent, wxString& input_file) const
 
 void GUI_App::import_model(wxWindow *parent, wxArrayString& input_files) const
 {
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+    if (this->plater_ != nullptr)
+        // hides the tooltip
+        plater_->get_current_canvas3D()->set_tooltip("");
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+
     input_files.Clear();
     wxFileDialog dialog(parent ? parent : GetTopWindow(),
         _(L("Choose one or more files (STL/OBJ/AMF/3MF/PRUSA):")),
@@ -661,15 +780,16 @@ bool GUI_App::select_language()
 	// Try to load a new language.
     if (index != -1 && (init_selection == -1 || init_selection != index)) {
     	const wxLanguageInfo *new_language_info = language_infos[index];
-        if (new_language_info == m_language_info_best || new_language_info == m_language_info_system) {
-        	// The newly selected profile matches user's default profile exactly. That's great.
-        } else if (m_language_info_best != nullptr && new_language_info->CanonicalName.BeforeFirst('_') == m_language_info_best->CanonicalName.BeforeFirst('_'))
-    		new_language_info = m_language_info_best;
-    	else if (m_language_info_system != nullptr && new_language_info->CanonicalName.BeforeFirst('_') == m_language_info_system->CanonicalName.BeforeFirst('_'))
-            new_language_info = m_language_info_system;
     	if (this->load_language(new_language_info->CanonicalName, false)) {
 			// Save language at application config.
-			app_config->set("translation_language", m_wxLocale->GetCanonicalName().ToUTF8().data());
+            // Which language to save as the selected dictionary language?
+            // 1) Hopefully the language set to wxTranslations by this->load_language(), but that API is weird and we don't want to rely on its
+            //    stability in the future:
+            //    wxTranslations::Get()->GetBestTranslation(SLIC3R_APP_KEY, wxLANGUAGE_ENGLISH);
+            // 2) Current locale language may not match the dictionary name, see GH issue #3901
+            //    m_wxLocale->GetCanonicalName()
+            // 3) new_language_info->CanonicalName is a safe bet. It points to a valid dictionary name.
+			app_config->set("translation_language", new_language_info->CanonicalName.ToUTF8().data());            
 			app_config->save();
     		return true;
     	}
@@ -698,7 +818,6 @@ bool GUI_App::load_language(wxString language, bool initial)
 	        	BOOST_LOG_TRIVIAL(trace) << boost::format("System language detected (user locales and such): %1%") % m_language_info_system->CanonicalName.ToUTF8().data();
 	        }
 		}
-#if defined(__WXMSW__) || defined(__WXOSX__)
         {
 	    	// Allocating a temporary locale will switch the default wxTranslations to its internal wxTranslations instance.
 	    	wxLocale temp_locale;
@@ -715,7 +834,6 @@ bool GUI_App::load_language(wxString language, bool initial)
 	        	BOOST_LOG_TRIVIAL(trace) << boost::format("Best translation language detected (may be different from user locales): %1%") % m_language_info_best->CanonicalName.ToUTF8().data();
 			}
 		}
-#endif
     }
 
 	const wxLanguageInfo *language_info = language.empty() ? nullptr : wxLocale::FindLanguageInfo(language);
@@ -731,6 +849,7 @@ bool GUI_App::load_language(wxString language, bool initial)
 	}
 
     if (language_info == nullptr) {
+        // PrusaSlicer does not support the Right to Left languages yet.
         if (m_language_info_system != nullptr && m_language_info_system->LayoutDirection != wxLayout_RightToLeft)
             language_info = m_language_info_system;
         if (m_language_info_best != nullptr && m_language_info_best->LayoutDirection != wxLayout_RightToLeft)
@@ -748,6 +867,16 @@ bool GUI_App::load_language(wxString language, bool initial)
     	language_dict = wxLANGUAGE_CZECH;
 		BOOST_LOG_TRIVIAL(trace) << "Using Czech dictionaries for Slovak language";
     }
+
+    // Select language for locales. This language may be different from the language of the dictionary.
+    if (language_info == m_language_info_best || language_info == m_language_info_system) {
+        // The current language matches user's default profile exactly. That's great.
+    } else if (m_language_info_best != nullptr && language_info->CanonicalName.BeforeFirst('_') == m_language_info_best->CanonicalName.BeforeFirst('_')) {
+        // Use whatever the operating system recommends, if it the language code of the dictionary matches the recommended language.
+        // This allows a Swiss guy to use a German dictionary without forcing him to German locales.
+        language_info = m_language_info_best;
+    } else if (m_language_info_system != nullptr && language_info->CanonicalName.BeforeFirst('_') == m_language_info_system->CanonicalName.BeforeFirst('_'))
+        language_info = m_language_info_system;
 
     if (! wxLocale::IsAvailable(language_info->Language)) {
     	// Loading the language dictionary failed.
@@ -775,7 +904,7 @@ bool GUI_App::load_language(wxString language, bool initial)
     wxTranslations::Get()->SetLanguage(language_dict);
     m_wxLocale->AddCatalog(SLIC3R_APP_KEY);
     m_imgui->set_language(into_u8(language_info->CanonicalName));
-	//FIXME This is a temporary workaround, the correct solution is to switch to "C" locale during file import / export only.
+    //FIXME This is a temporary workaround, the correct solution is to switch to "C" locale during file import / export only.
     wxSetlocale(LC_NUMERIC, "C");
     Preset::update_suffix_modified();
 	return true;
@@ -842,7 +971,8 @@ void GUI_App::add_config_menu(wxMenuBar *menu)
     local_menu->AppendSeparator();
     auto mode_menu = new wxMenu();
     mode_menu->AppendRadioItem(config_id_base + ConfigMenuModeSimple, _(L("Simple")), _(L("Simple View Mode")));
-    mode_menu->AppendRadioItem(config_id_base + ConfigMenuModeAdvanced, _(L("Advanced")), _(L("Advanced View Mode")));
+//    mode_menu->AppendRadioItem(config_id_base + ConfigMenuModeAdvanced, _(L("Advanced")), _(L("Advanced View Mode")));
+    mode_menu->AppendRadioItem(config_id_base + ConfigMenuModeAdvanced, _CTX(L_CONTEXT("Advanced", "Mode"), "Mode"), _L("Advanced View Mode"));
     mode_menu->AppendRadioItem(config_id_base + ConfigMenuModeExpert, _(L("Expert")), _(L("Expert View Mode")));
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& evt) { if(get_mode() == comSimple) evt.Check(true); }, config_id_base + ConfigMenuModeSimple);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& evt) { if(get_mode() == comAdvanced) evt.Check(true); }, config_id_base + ConfigMenuModeAdvanced);

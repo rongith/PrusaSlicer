@@ -405,6 +405,7 @@ static inline void model_volume_list_copy_configs(ModelObject &model_object_dst,
         // Copy the ModelVolume data.
         mv_dst.name   = mv_src.name;
 		static_cast<DynamicPrintConfig&>(mv_dst.config) = static_cast<const DynamicPrintConfig&>(mv_src.config);
+        mv_dst.m_supported_facets = mv_src.m_supported_facets;
         //FIXME what to do with the materials?
         // mv_dst.m_material_id = mv_src.m_material_id;
         ++ i_src;
@@ -855,7 +856,7 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
             }
             // Copy content of the ModelObject including its ID, do not change the parent.
             model_object.assign_copy(model_object_new);
-        } else if (support_blockers_differ || support_enforcers_differ) {
+        } else if (support_blockers_differ || support_enforcers_differ || model_custom_supports_data_changed(model_object, model_object_new)) {
             // First stop background processing before shuffling or deleting the ModelVolumes in the ModelObject's list.
             this->call_cancel_callback();
             update_apply_status(false);
@@ -863,8 +864,10 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
             auto range = print_object_status.equal_range(PrintObjectStatus(model_object.id()));
             for (auto it = range.first; it != range.second; ++ it)
                 update_apply_status(it->print_object->invalidate_step(posSupportMaterial));
-            // Copy just the support volumes.
-            model_volume_list_update_supports(model_object, model_object_new);
+            if (support_enforcers_differ || support_blockers_differ) {
+                // Copy just the support volumes.
+                model_volume_list_update_supports(model_object, model_object_new);
+            }
         }
         if (! model_parts_differ && ! modifiers_differ) {
             // Synchronize Object's config.
@@ -882,7 +885,7 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
                     }
                 }
             }
-            // Synchronize (just copy) the remaining data of ModelVolumes (name, config).
+            // Synchronize (just copy) the remaining data of ModelVolumes (name, config, custom supports data).
             //FIXME What to do with m_material_id?
 			model_volume_list_copy_configs(model_object /* dst */, model_object_new /* src */, ModelVolumeType::MODEL_PART);
 			model_volume_list_copy_configs(model_object /* dst */, model_object_new /* src */, ModelVolumeType::PARAMETER_MODIFIER);
@@ -1585,6 +1588,8 @@ void Print::process()
     for (PrintObject *obj : m_objects)
         obj->infill();
     for (PrintObject *obj : m_objects)
+        obj->ironing();
+    for (PrintObject *obj : m_objects)
         obj->generate_support_material();
     if (this->set_started(psWipeTower)) {
         m_wipe_tower_data.clear();
@@ -1623,11 +1628,7 @@ void Print::process()
 // The export_gcode may die for various reasons (fails to process output_filename_format,
 // write error into the G-code, cannot execute post-processing scripts).
 // It is up to the caller to show an error message.
-#if ENABLE_THUMBNAIL_GENERATOR
 std::string Print::export_gcode(const std::string& path_template, GCodePreviewData* preview_data, ThumbnailsGeneratorCallback thumbnail_cb)
-#else
-std::string Print::export_gcode(const std::string &path_template, GCodePreviewData *preview_data)
-#endif // ENABLE_THUMBNAIL_GENERATOR
 {
     // output everything to a G-code file
     // The following call may die if the output_filename_format template substitution fails.
@@ -1644,11 +1645,7 @@ std::string Print::export_gcode(const std::string &path_template, GCodePreviewDa
 
     // The following line may die for multiple reasons.
     GCode gcode;
-#if ENABLE_THUMBNAIL_GENERATOR
     gcode.do_export(this, path.c_str(), preview_data, thumbnail_cb);
-#else
-    gcode.do_export(this, path.c_str(), preview_data);
-#endif // ENABLE_THUMBNAIL_GENERATOR
     return path.c_str();
 }
 
@@ -1936,7 +1933,7 @@ void Print::_make_brim()
 				// Find all pieces that the initial loop was split into.
 				size_t j = i + 1;
                 for (; j < loops_trimmed_order.size() && loops_trimmed_order[i].second == loops_trimmed_order[j].second; ++ j) ;
-				const ClipperLib_Z::Path &first_path = *loops_trimmed_order[i].first;
+                const ClipperLib_Z::Path &first_path = *loops_trimmed_order[i].first;
 				if (i + 1 == j && first_path.size() > 3 && first_path.front().X == first_path.back().X && first_path.front().Y == first_path.back().Y) {
 					auto *loop = new ExtrusionLoop();
 					m_brim.entities.emplace_back(loop);

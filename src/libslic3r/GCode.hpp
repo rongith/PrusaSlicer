@@ -17,9 +17,7 @@
 #include "GCodeTimeEstimator.hpp"
 #include "EdgeGrid.hpp"
 #include "GCode/Analyzer.hpp"
-#if ENABLE_THUMBNAIL_GENERATOR
 #include "GCode/ThumbnailData.hpp"
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
 #include <memory>
 #include <string>
@@ -166,11 +164,7 @@ public:
 
     // throws std::runtime_exception on error,
     // throws CanceledException through print->throw_if_canceled().
-#if ENABLE_THUMBNAIL_GENERATOR
     void            do_export(Print* print, const char* path, GCodePreviewData* preview_data = nullptr, ThumbnailsGeneratorCallback thumbnail_cb = nullptr);
-#else
-    void            do_export(Print *print, const char *path, GCodePreviewData *preview_data = nullptr);
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
     // Exported for the helper classes (OozePrevention, Wipe) and for the Perl binding for unit tests.
     const Vec2d&    origin() const { return m_origin; }
@@ -210,11 +204,7 @@ public:
     };
 
 private:
-#if ENABLE_THUMBNAIL_GENERATOR
     void            _do_export(Print &print, FILE *file, ThumbnailsGeneratorCallback thumbnail_cb);
-#else
-    void            _do_export(Print &print, FILE *file);
-#endif //ENABLE_THUMBNAIL_GENERATOR
 
     static std::vector<LayerToPrint>        		                   collect_layers_to_print(const PrintObject &object);
     static std::vector<std::pair<coordf_t, std::vector<LayerToPrint>>> collect_layers_to_print(const Print &print);
@@ -305,7 +295,7 @@ private:
 		const size_t                     				 single_object_instance_idx);
 
     std::string     extrude_perimeters(const Print &print, const std::vector<ObjectByExtruder::Island::Region> &by_region, std::unique_ptr<EdgeGrid::Grid> &lower_layer_edge_grid);
-    std::string     extrude_infill(const Print &print, const std::vector<ObjectByExtruder::Island::Region> &by_region);
+    std::string     extrude_infill(const Print &print, const std::vector<ObjectByExtruder::Island::Region> &by_region, bool ironing);
     std::string     extrude_support(const ExtrusionEntityCollection &support_fills);
 
     std::string     travel_to(const Point &point, ExtrusionRole role, std::string comment);

@@ -11,9 +11,7 @@
 #include "Slicing.hpp"
 #include "GCode/ToolOrdering.hpp"
 #include "GCode/WipeTower.hpp"
-#if ENABLE_THUMBNAIL_GENERATOR
 #include "GCode/ThumbnailData.hpp"
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
 #include "libslic3r.h"
 
@@ -43,7 +41,7 @@ enum PrintStep {
 
 enum PrintObjectStep {
     posSlice, posPerimeters, posPrepareInfill,
-    posInfill, posSupportMaterial, posCount,
+    posInfill, posIroning, posSupportMaterial, posCount,
 };
 
 // A PrintRegion object represents a group of volumes to print
@@ -194,6 +192,11 @@ public:
     std::vector<ExPolygons>     slice_support_blockers() const { return this->slice_support_volumes(ModelVolumeType::SUPPORT_BLOCKER); }
     std::vector<ExPolygons>     slice_support_enforcers() const { return this->slice_support_volumes(ModelVolumeType::SUPPORT_ENFORCER); }
 
+    // Helpers to project custom supports on slices
+    void project_and_append_custom_supports(FacetSupportType type, std::vector<ExPolygons>& expolys) const;
+    void project_and_append_custom_enforcers(std::vector<ExPolygons>& enforcers) const { project_and_append_custom_supports(FacetSupportType::ENFORCER, enforcers); }
+    void project_and_append_custom_blockers(std::vector<ExPolygons>& blockers) const { project_and_append_custom_supports(FacetSupportType::BLOCKER, blockers); }
+
 private:
     // to be called from Print only.
     friend class Print;
@@ -220,6 +223,7 @@ private:
     void make_perimeters();
     void prepare_infill();
     void infill();
+    void ironing();
     void generate_support_material();
 
     void _slice(const std::vector<coordf_t> &layer_height_profile);
@@ -364,11 +368,7 @@ public:
     void                process() override;
     // Exports G-code into a file name based on the path_template, returns the file path of the generated G-code file.
     // If preview_data is not null, the preview_data is filled in for the G-code visualization (not used by the command line Slic3r).
-#if ENABLE_THUMBNAIL_GENERATOR
     std::string         export_gcode(const std::string& path_template, GCodePreviewData* preview_data, ThumbnailsGeneratorCallback thumbnail_cb = nullptr);
-#else
-    std::string         export_gcode(const std::string &path_template, GCodePreviewData *preview_data);
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
     // methods for handling state
     bool                is_step_done(PrintStep step) const { return Inherited::is_step_done(step); }

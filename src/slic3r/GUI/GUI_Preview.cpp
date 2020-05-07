@@ -7,7 +7,7 @@
 #include "AppConfig.hpp"
 #include "3DScene.hpp"
 #include "BackgroundSlicingProcess.hpp"
-#include "GLCanvas3DManager.hpp"
+#include "OpenGLManager.hpp"
 #include "GLCanvas3D.hpp"
 #include "PresetBundle.hpp"
 #include "DoubleSlider.hpp"
@@ -27,33 +27,36 @@
 namespace Slic3r {
 namespace GUI {
 
-View3D::View3D(wxWindow* parent, Bed3D& bed, Camera& camera, GLToolbar& view_toolbar, Model* model, DynamicPrintConfig* config, BackgroundSlicingProcess* process)
+View3D::View3D(wxWindow* parent, Model* model, DynamicPrintConfig* config, BackgroundSlicingProcess* process)
     : m_canvas_widget(nullptr)
     , m_canvas(nullptr)
 {
-    init(parent, bed, camera, view_toolbar, model, config, process);
+    init(parent, model, config, process);
 }
 
 View3D::~View3D()
 {
+    if (m_canvas != nullptr)
+        delete m_canvas;
+
     if (m_canvas_widget != nullptr)
-    {
-        _3DScene::remove_canvas(m_canvas_widget);
         delete m_canvas_widget;
-        m_canvas = nullptr;
-    }
 }
 
-bool View3D::init(wxWindow* parent, Bed3D& bed, Camera& camera, GLToolbar& view_toolbar, Model* model, DynamicPrintConfig* config, BackgroundSlicingProcess* process)
+bool View3D::init(wxWindow* parent, Model* model, DynamicPrintConfig* config, BackgroundSlicingProcess* process)
 {
     if (!Create(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0 /* disable wxTAB_TRAVERSAL */))
         return false;
 
-    m_canvas_widget = GLCanvas3DManager::create_wxglcanvas(this);
-    _3DScene::add_canvas(m_canvas_widget, bed, camera, view_toolbar);
-    m_canvas = _3DScene::get_canvas(this->m_canvas_widget);
+    m_canvas_widget = OpenGLManager::create_wxglcanvas(*this);
+    if (m_canvas_widget == nullptr)
+        return false;
 
-    m_canvas->allow_multisample(GLCanvas3DManager::can_multisample());
+    m_canvas = new GLCanvas3D(m_canvas_widget);
+    m_canvas->set_context(wxGetApp().init_glcontext(*m_canvas_widget));
+    m_canvas->bind_event_handlers();
+
+    m_canvas->allow_multisample(OpenGLManager::can_multisample());
     // XXX: If have OpenGL
     m_canvas->enable_picking(true);
     m_canvas->enable_moving(true);
@@ -65,7 +68,11 @@ bool View3D::init(wxWindow* parent, Bed3D& bed, Camera& camera, GLToolbar& view_
     m_canvas->enable_selection(true);
     m_canvas->enable_main_toolbar(true);
     m_canvas->enable_undoredo_toolbar(true);
+    m_canvas->enable_collapse_toolbar(true);
     m_canvas->enable_labels(true);
+#if ENABLE_SLOPE_RENDERING
+    m_canvas->enable_slope(true);
+#endif // ENABLE_SLOPE_RENDERING
 
     wxBoxSizer* main_sizer = new wxBoxSizer(wxVERTICAL);
     main_sizer->Add(m_canvas_widget, 1, wxALL | wxEXPAND, 0);
@@ -164,7 +171,7 @@ void View3D::render()
 }
 
 Preview::Preview(
-    wxWindow* parent, Bed3D& bed, Camera& camera, GLToolbar& view_toolbar, Model* model, DynamicPrintConfig* config, 
+    wxWindow* parent, Model* model, DynamicPrintConfig* config,
     BackgroundSlicingProcess* process, GCodePreviewData* gcode_preview_data, std::function<void()> schedule_background_process_func)
     : m_canvas_widget(nullptr)
     , m_canvas(nullptr)
@@ -190,27 +197,32 @@ Preview::Preview(
     , m_volumes_cleanup_required(false)
 #endif // __linux__
 {
-    if (init(parent, bed, camera, view_toolbar, model))
+    if (init(parent, model))
     {
         show_hide_ui_elements("none");
         load_print();
     }
 }
 
-bool Preview::init(wxWindow* parent, Bed3D& bed, Camera& camera, GLToolbar& view_toolbar, Model* model)
+bool Preview::init(wxWindow* parent, Model* model)
 {
     if (!Create(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0 /* disable wxTAB_TRAVERSAL */))
         return false;
 
-    m_canvas_widget = GLCanvas3DManager::create_wxglcanvas(this);
-    _3DScene::add_canvas(m_canvas_widget, bed, camera, view_toolbar);
-    m_canvas = _3DScene::get_canvas(this->m_canvas_widget);
-    m_canvas->allow_multisample(GLCanvas3DManager::can_multisample());
+    m_canvas_widget = OpenGLManager::create_wxglcanvas(*this);
+    if (m_canvas_widget == nullptr)
+        return false;
+
+    m_canvas = new GLCanvas3D(m_canvas_widget);
+    m_canvas->set_context(wxGetApp().init_glcontext(*m_canvas_widget));
+    m_canvas->bind_event_handlers();
+    m_canvas->allow_multisample(OpenGLManager::can_multisample());
     m_canvas->set_config(m_config);
     m_canvas->set_model(model);
     m_canvas->set_process(m_process);
     m_canvas->enable_legend_texture(true);
     m_canvas->enable_dynamic_background(true);
+    m_canvas->enable_collapse_toolbar(true);
 
     m_double_slider_sizer = new wxBoxSizer(wxHORIZONTAL);
     create_double_slider();
@@ -313,12 +325,11 @@ Preview::~Preview()
 {
     unbind_event_handlers();
 
+    if (m_canvas != nullptr)
+        delete m_canvas;
+
     if (m_canvas_widget != nullptr)
-    {
-		_3DScene::remove_canvas(m_canvas_widget);
         delete m_canvas_widget;
-        m_canvas = nullptr;
-    }
 }
 
 void Preview::set_as_dirty()

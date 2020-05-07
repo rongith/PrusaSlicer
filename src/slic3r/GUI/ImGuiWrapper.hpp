@@ -8,6 +8,10 @@
 
 #include "libslic3r/Point.hpp"
 
+namespace Slic3r {namespace Search {
+struct OptionViewParameters;
+}}
+
 class wxString;
 class wxMouseEvent;
 class wxKeyEvent;
@@ -73,7 +77,9 @@ public:
     bool slider_float(const std::string& label, float* v, float v_min, float v_max, const char* format = "%.3f", float power = 1.0f);
     bool slider_float(const wxString& label, float* v, float v_min, float v_max, const char* format = "%.3f", float power = 1.0f);
     bool combo(const wxString& label, const std::vector<std::string>& options, int& selection);   // Use -1 to not mark any option as selected
-    bool undo_redo_list(const ImVec2& size, const bool is_undo, bool (*items_getter)(const bool, int, const char**), int& hovered, int& selected);
+    bool undo_redo_list(const ImVec2& size, const bool is_undo, bool (*items_getter)(const bool, int, const char**), int& hovered, int& selected, int& mouse_wheel);
+    void search_list(const ImVec2& size, bool (*items_getter)(int, const char** label, const char** tooltip), char* search_str,
+                     Search::OptionViewParameters& view_params, int& selected, bool& edited, int& mouse_wheel);
 
     void disabled_begin(bool disabled);
     void disabled_end();
@@ -90,6 +96,7 @@ private:
     void render_draw_data(ImDrawData *draw_data);
     bool display_initialized() const;
     void destroy_font();
+    std::vector<unsigned char> load_svg(const std::string& bitmap_name, unsigned target_width, unsigned target_height);
 
     static const char* clipboard_get(void* user_data);
     static void clipboard_set(void* user_data, const char* text);

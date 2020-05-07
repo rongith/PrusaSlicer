@@ -61,6 +61,9 @@ public:
         Disabled,
         Hover,
         HoverPressed,
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+        HoverDisabled,
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
         Num_States
     };
 
@@ -115,13 +118,20 @@ public:
     const std::string& get_tooltip() const { return m_data.tooltip; }
     const std::string& get_additional_tooltip() const { return m_data.additional_tooltip; }
     void set_additional_tooltip(const std::string& text) { m_data.additional_tooltip = text; }
+    void set_tooltip(const std::string& text)            { m_data.tooltip = text; }
 
     void do_left_action() { m_last_action_type = Left; m_data.left.action_callback(); }
     void do_right_action() { m_last_action_type = Right; m_data.right.action_callback(); }
 
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+    bool is_enabled() const { return (m_state != Disabled) && (m_state != HoverDisabled); }
+    bool is_disabled() const { return (m_state == Disabled) || (m_state == HoverDisabled); }
+    bool is_hovered() const { return (m_state == Hover) || (m_state == HoverPressed) || (m_state == HoverDisabled); }
+#else
     bool is_enabled() const { return m_state != Disabled; }
     bool is_disabled() const { return m_state == Disabled; }
     bool is_hovered() const { return (m_state == Hover) || (m_state == HoverPressed); }
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     bool is_pressed() const { return (m_state == Pressed) || (m_state == HoverPressed); }
     bool is_visible() const { return m_data.visible; }
     bool is_separator() const { return m_type == Separator; }
@@ -252,7 +262,9 @@ private:
     };
 
     MouseCapture m_mouse_capture;
+#if !ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     std::string m_tooltip;
+#endif // !ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     int m_pressed_toggable_id;
 
 public:
@@ -298,10 +310,15 @@ public:
     void force_left_action(int item_id, GLCanvas3D& parent) { do_action(GLToolbarItem::Left, item_id, parent, false); }
     void force_right_action(int item_id, GLCanvas3D& parent) { do_action(GLToolbarItem::Right, item_id, parent, false); }
 
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+    std::string get_tooltip() const;
+#else
     const std::string& get_tooltip() const { return m_tooltip; }
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 
     void get_additional_tooltip(int item_id, std::string& text);
     void set_additional_tooltip(int item_id, const std::string& text);
+    void set_tooltip(int item_id, const std::string& text);
 
     // returns true if any item changed its state
     bool update_items_state();
@@ -318,9 +335,15 @@ private:
     float get_height_vertical() const;
     float get_main_size() const;
     void do_action(GLToolbarItem::EActionType type, int item_id, GLCanvas3D& parent, bool check_hover);
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+    void update_hover_state(const Vec2d& mouse_pos, GLCanvas3D& parent);
+    void update_hover_state_horizontal(const Vec2d& mouse_pos, GLCanvas3D& parent);
+    void update_hover_state_vertical(const Vec2d& mouse_pos, GLCanvas3D& parent);
+#else
     std::string update_hover_state(const Vec2d& mouse_pos, GLCanvas3D& parent);
     std::string update_hover_state_horizontal(const Vec2d& mouse_pos, GLCanvas3D& parent);
     std::string update_hover_state_vertical(const Vec2d& mouse_pos, GLCanvas3D& parent);
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     // returns the id of the item under the given mouse position or -1 if none
     int contains_mouse(const Vec2d& mouse_pos, const GLCanvas3D& parent) const;
     int contains_mouse_horizontal(const Vec2d& mouse_pos, const GLCanvas3D& parent) const;

@@ -1,5 +1,4 @@
 #include "libslic3r/libslic3r.h"
-#include "slic3r/GUI/Gizmos/GLGizmos.hpp"
 #include "GLCanvas3D.hpp"
 
 #include "admesh/stl.h"
@@ -7,9 +6,7 @@
 #include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/GCode/PreviewData.hpp"
-#if ENABLE_THUMBNAIL_GENERATOR
 #include "libslic3r/GCode/ThumbnailData.hpp"
-#endif // ENABLE_THUMBNAIL_GENERATOR
 #include "libslic3r/Geometry.hpp"
 #include "libslic3r/ExtrusionEntity.hpp"
 #include "libslic3r/Utils.hpp"
@@ -22,6 +19,9 @@
 #include "slic3r/GUI/PresetBundle.hpp"
 #include "slic3r/GUI/Tab.hpp"
 #include "slic3r/GUI/GUI_Preview.hpp"
+#include "slic3r/GUI/OpenGLManager.hpp"
+#include "slic3r/GUI/3DBed.hpp"
+#include "slic3r/GUI/Camera.hpp"
 
 #include "GUI_App.hpp"
 #include "GUI_ObjectList.hpp"
@@ -61,11 +61,11 @@
 #include <algorithm>
 #include <cmath>
 #include "DoubleSlider.hpp"
-#if !ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+#if !ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 #if ENABLE_RENDER_STATISTICS
 #include <chrono>
 #endif // ENABLE_RENDER_STATISTICS
-#endif // !ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+#endif // !ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 
 #include <imgui/imgui_internal.h>
 
@@ -358,9 +358,7 @@ Rect GLCanvas3D::LayersEditing::get_bar_rect_viewport(const GLCanvas3D& canvas)
     const Size& cnv_size = canvas.get_canvas_size();
     float half_w = 0.5f * (float)cnv_size.get_width();
     float half_h = 0.5f * (float)cnv_size.get_height();
-
-    float inv_zoom = (float)canvas.get_camera().get_inv_zoom();
-
+    float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
     return Rect((half_w - thickness_bar_width(canvas)) * inv_zoom, half_h * inv_zoom, half_w * inv_zoom, -half_h * inv_zoom);
 }
 
@@ -774,6 +772,13 @@ bool GLCanvas3D::WarningTexture::generate(const std::string& msg_utf8, const GLC
 #else
     // select default font
     const float scale = canvas.get_canvas_size().get_scale_factor();
+#if ENABLE_RETINA_GL
+    // For non-visible or non-created window getBackingScaleFactor function return 0.0 value.
+    // And using of the zero scale causes a crash, when we trying to draw text to the (0,0) rectangle
+    // https://github.com/prusa3d/PrusaSlicer/issues/3916
+    if (scale <= 0.0f)
+        return false;
+#endif
     wxFont font = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT).Scale(scale);
 #endif
 
@@ -851,7 +856,7 @@ void GLCanvas3D::WarningTexture::render(const GLCanvas3D& canvas) const
     if ((m_id > 0) && (m_original_width > 0) && (m_original_height > 0) && (m_width > 0) && (m_height > 0))
     {
         const Size& cnv_size = canvas.get_canvas_size();
-        float inv_zoom = (float)canvas.get_camera().get_inv_zoom();
+        float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
         float left = (-0.5f * (float)m_original_width) * inv_zoom;
         float top = (-0.5f * (float)cnv_size.get_height() + (float)m_original_height + 2.0f) * inv_zoom;
         float right = left + (float)m_original_width * inv_zoom;
@@ -1218,7 +1223,7 @@ void GLCanvas3D::LegendTexture::render(const GLCanvas3D& canvas) const
     if ((m_id > 0) && (m_original_width > 0) && (m_original_height > 0) && (m_width > 0) && (m_height > 0))
     {
         const Size& cnv_size = canvas.get_canvas_size();
-        float inv_zoom = (float)canvas.get_camera().get_inv_zoom();
+        float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
         float left = (-0.5f * (float)cnv_size.get_width()) * inv_zoom;
         float top = (0.5f * (float)cnv_size.get_height()) * inv_zoom;
         float right = left + (float)m_original_width * inv_zoom;
@@ -1244,7 +1249,7 @@ void GLCanvas3D::Labels::render(const std::vector<const ModelInstance*>& sorted_
     if (!m_enabled || !is_shown())
         return;
 
-    const Camera& camera = m_canvas.get_camera();
+    const Camera& camera = wxGetApp().plater()->get_camera();
     const Model* model = m_canvas.get_model();
     if (model == nullptr)
         return;
@@ -1298,7 +1303,7 @@ void GLCanvas3D::Labels::render(const std::vector<const ModelInstance*>& sorted_
 
     // updates print order strings
     if (sorted_instances.size() > 1) {
-        for (int i = 0; i < sorted_instances.size(); ++i) {
+        for (size_t i = 0; i < sorted_instances.size(); ++i) {
             size_t id = sorted_instances[i]->id().id;
             std::vector<Owner>::iterator it = std::find_if(owners.begin(), owners.end(), [id](const Owner& owner) {
                 return owner.model_instance_id == id;
@@ -1373,7 +1378,6 @@ void GLCanvas3D::Labels::render(const std::vector<const ModelInstance*>& sorted_
 }
 
 #if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 void GLCanvas3D::Tooltip::set_text(const std::string& text)
 {
     // If the mouse is inside an ImGUI dialog, then the tooltip is suppressed.
@@ -1386,15 +1390,9 @@ void GLCanvas3D::Tooltip::set_text(const std::string& text)
         m_text = new_text;
     }
 }
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 void GLCanvas3D::Tooltip::render(const Vec2d& mouse_position, GLCanvas3D& canvas) const
-#else
-void GLCanvas3D::Tooltip::render(const Vec2d& mouse_position) const
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 {
-#if ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
     static ImVec2 size(0.0f, 0.0f);
 
     auto validate_position = [](const Vec2d& position, const GLCanvas3D& canvas, const ImVec2& wnd_size) {
@@ -1403,56 +1401,91 @@ void GLCanvas3D::Tooltip::render(const Vec2d& mouse_position) const
         float y = std::clamp((float)position(1) + 16, 0.0f, (float)cnv_size.get_height() - wnd_size.y);
         return Vec2f(x, y);
     };
-#endif // ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
 
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
     if (m_text.empty())
         return;
 
     // draw the tooltip as hidden until the delay is expired
-    float alpha = (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_start_time).count() < 500) ? 0.0f : 1.0;
-#else
-    if (m_text.empty())
-        return;
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
+    // use a value of alpha slightly different from 0.0f because newer imgui does not calculate properly the window size if alpha == 0.0f
+    float alpha = (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_start_time).count() < 500) ? 0.01f : 1.0f;
 
-#if ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
     Vec2f position = validate_position(mouse_position, canvas, size);
-#endif // ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
 
     ImGuiWrapper& imgui = *wxGetApp().imgui();
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
-#if ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
     imgui.set_next_window_pos(position(0), position(1), ImGuiCond_Always, 0.0f, 0.0f);
-#else
-    imgui.set_next_window_pos(mouse_position(0), mouse_position(1) + 16, ImGuiCond_Always, 0.0f, 0.0f);
-#endif // ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
 
     imgui.begin(_(L("canvas_tooltip")), ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMouseInputs | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoFocusOnAppearing);
     ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
     ImGui::TextUnformatted(m_text.c_str());
 
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
     // force re-render while the windows gets to its final size (it may take several frames) or while hidden
-    if (alpha == 0.0f || ImGui::GetWindowContentRegionWidth() + 2.0f * ImGui::GetStyle().WindowPadding.x != ImGui::CalcWindowExpectedSize(ImGui::GetCurrentWindow()).x)
+    if (alpha < 1.0f || ImGui::GetWindowContentRegionWidth() + 2.0f * ImGui::GetStyle().WindowPadding.x != ImGui::CalcWindowExpectedSize(ImGui::GetCurrentWindow()).x)
         canvas.request_extra_frame();
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 
-#if ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
     size = ImGui::GetWindowSize();
-#endif // ENABLE_CANVAS_CONSTRAINED_TOOLTIP_USING_IMGUI
 
     imgui.end();
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
     ImGui::PopStyleVar(2);
-#else
-    ImGui::PopStyleVar();
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 }
 #endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+
+#if ENABLE_SLOPE_RENDERING
+void GLCanvas3D::Slope::render() const
+{
+    if (is_shown())
+    {
+        const std::array<float, 2>& z_range = m_volumes.get_slope_z_range();
+        std::array<float, 2> angle_range = { Geometry::rad2deg(::acos(z_range[0])) - 90.0f, Geometry::rad2deg(::acos(z_range[1])) - 90.0f };
+        bool modified = false;
+
+        ImGuiWrapper& imgui = *wxGetApp().imgui();
+        const Size& cnv_size = m_canvas.get_canvas_size();
+        imgui.set_next_window_pos((float)cnv_size.get_width(), (float)cnv_size.get_height(), ImGuiCond_Always, 1.0f, 1.0f);
+        imgui.begin(_(L("Slope visualization")), nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+
+        imgui.text(_(L("Facets' normal angle range (degrees)")) + ":");
+
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.75f, 0.75f, 0.0f, 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(1.0f, 1.0f, 0.0f, 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.85f, 0.85f, 0.0f, 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.25f, 0.25f, 0.0f, 1.0f));
+        if (ImGui::SliderFloat("##yellow", &angle_range[0], 0.0f, 90.0f, "%.1f"))
+        {
+            modified = true;
+            if (angle_range[1] < angle_range[0])
+                angle_range[1] = angle_range[0];
+        }
+        ImGui::PopStyleColor(4);
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.75f, 0.0f, 0.0f, 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(1.0f, 0.0f, 0.0f, 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.85f, 0.0f, 0.0f, 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.25f, 0.0f, 0.0f, 1.0f));
+        if (ImGui::SliderFloat("##red", &angle_range[1], 0.0f, 90.0f, "%.1f"))
+        {
+            modified = true;
+            if (angle_range[0] > angle_range[1])
+                angle_range[0] = angle_range[1];
+        }
+        ImGui::PopStyleColor(4);
+
+        ImGui::Separator();
+
+        if (imgui.button(_(L("Default"))))
+            m_volumes.set_default_slope_z_range();
+
+        // to let the dialog immediately showup without waiting for a mouse move
+        if (ImGui::GetWindowContentRegionWidth() + 2.0f * ImGui::GetStyle().WindowPadding.x != ImGui::CalcWindowExpectedSize(ImGui::GetCurrentWindow()).x)
+            m_canvas.request_extra_frame();
+
+        imgui.end();
+
+        if (modified)
+            m_volumes.set_slope_z_range({ -::cos(Geometry::deg2rad(90.0f - angle_range[0])), -::cos(Geometry::deg2rad(90.0f - angle_range[1])) });
+    }
+    }
+#endif // ENABLE_SLOPE_RENDERING
 
 wxDEFINE_EVENT(EVT_GLCANVAS_SCHEDULE_BACKGROUND_PROCESS, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_OBJECT_SELECT, SimpleEvent);
@@ -1478,27 +1511,24 @@ wxDEFINE_EVENT(EVT_GLCANVAS_MOVE_DOUBLE_SLIDER, wxKeyEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_EDIT_COLOR_CHANGE, wxKeyEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_UNDO, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_REDO, SimpleEvent);
+wxDEFINE_EVENT(EVT_GLCANVAS_COLLAPSE_SIDEBAR, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_RESET_LAYER_HEIGHT_PROFILE, SimpleEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_ADAPTIVE_LAYER_HEIGHT_PROFILE, Event<float>);
 wxDEFINE_EVENT(EVT_GLCANVAS_SMOOTH_LAYER_HEIGHT_PROFILE, HeightProfileSmoothEvent);
 wxDEFINE_EVENT(EVT_GLCANVAS_RELOAD_FROM_DISK, SimpleEvent);
 
-#if ENABLE_THUMBNAIL_GENERATOR
 const double GLCanvas3D::DefaultCameraZoomToBoxMarginFactor = 1.25;
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
-GLCanvas3D::GLCanvas3D(wxGLCanvas* canvas, Bed3D& bed, Camera& camera, GLToolbar& view_toolbar)
+GLCanvas3D::GLCanvas3D(wxGLCanvas* canvas)
     : m_canvas(canvas)
     , m_context(nullptr)
 #if ENABLE_RETINA_GL
     , m_retina_helper(nullptr)
 #endif
     , m_in_render(false)
-    , m_bed(bed)
-    , m_camera(camera)
-    , m_view_toolbar(view_toolbar)
     , m_main_toolbar(GLToolbar::Normal, "Top")
     , m_undoredo_toolbar(GLToolbar::Normal, "Top")
+    , m_collapse_toolbar(GLToolbar::Normal, "Top")
     , m_gizmos(*this)
     , m_use_clipping_planes(false)
     , m_sidebar_field("")
@@ -1524,14 +1554,15 @@ GLCanvas3D::GLCanvas3D(wxGLCanvas* canvas, Bed3D& bed, Camera& camera, GLToolbar
 #endif // ENABLE_RENDER_PICKING_PASS
     , m_render_sla_auxiliaries(true)
     , m_labels(*this)
+#if ENABLE_SLOPE_RENDERING
+    , m_slope(*this, m_volumes)
+#endif // ENABLE_SLOPE_RENDERING
 {
     if (m_canvas != nullptr) {
         m_timer.SetOwner(m_canvas);
 #if ENABLE_RETINA_GL
         m_retina_helper.reset(new RetinaHelper(canvas));
-        // set default view_toolbar icons size equal to GLGizmosManager::Default_Icons_Size
-        m_view_toolbar.set_icons_size(GLGizmosManager::Default_Icons_Size);
-#endif
+#endif // ENABLE_RETINA_GL
     }
 
     m_selection.set_volumes(&m_volumes.volumes);
@@ -1644,14 +1675,14 @@ void GLCanvas3D::reset_volumes()
     if (!m_initialized)
         return;
 
+    if (m_volumes.empty())
+        return;
+
     _set_current();
 
-    if (!m_volumes.empty())
-    {
-        m_selection.clear();
-        m_volumes.clear();
-        m_dirty = true;
-    }
+    m_selection.clear();
+    m_volumes.clear();
+    m_dirty = true;
 
     _set_warning_texture(WarningTexture::ObjectOutside, false);
 }
@@ -1668,6 +1699,8 @@ void GLCanvas3D::toggle_sla_auxiliaries_visibility(bool visible, const ModelObje
     m_render_sla_auxiliaries = visible;
 
     for (GLVolume* vol : m_volumes.volumes) {
+        if (vol->composite_id.object_id == 1000)
+            continue; // the wipe tower
         if ((mo == nullptr || m_model->objects[vol->composite_id.object_id] == mo)
         && (instance_idx == -1 || vol->composite_id.instance_id == instance_idx)
         && vol->composite_id.volume_id < 0)
@@ -1678,10 +1711,15 @@ void GLCanvas3D::toggle_sla_auxiliaries_visibility(bool visible, const ModelObje
 void GLCanvas3D::toggle_model_objects_visibility(bool visible, const ModelObject* mo, int instance_idx)
 {
     for (GLVolume* vol : m_volumes.volumes) {
-        if ((mo == nullptr || m_model->objects[vol->composite_id.object_id] == mo)
-        && (instance_idx == -1 || vol->composite_id.instance_id == instance_idx)) {
-            vol->is_active = visible;
-            vol->force_native_color = (instance_idx != -1);
+        if (vol->composite_id.object_id == 1000) { // wipe tower
+                vol->is_active = (visible && mo == nullptr);
+        }
+        else {
+            if ((mo == nullptr || m_model->objects[vol->composite_id.object_id] == mo)
+            && (instance_idx == -1 || vol->composite_id.instance_id == instance_idx)) {
+                vol->is_active = visible;
+                vol->force_native_color = (instance_idx != -1);
+            }
         }
     }
     if (visible && !mo)
@@ -1735,13 +1773,18 @@ void GLCanvas3D::set_model(Model* model)
 void GLCanvas3D::bed_shape_changed()
 {
     refresh_camera_scene_box();
-    m_camera.requires_zoom_to_bed = true;
+    wxGetApp().plater()->get_camera().requires_zoom_to_bed = true;
     m_dirty = true;
 }
 
 void GLCanvas3D::set_color_by(const std::string& value)
 {
     m_color_by = value;
+}
+
+void GLCanvas3D::refresh_camera_scene_box()
+{
+    wxGetApp().plater()->get_camera().set_scene_box(scene_bounding_box());
 }
 
 BoundingBoxf3 GLCanvas3D::volumes_bounding_box() const
@@ -1758,8 +1801,7 @@ BoundingBoxf3 GLCanvas3D::volumes_bounding_box() const
 BoundingBoxf3 GLCanvas3D::scene_bounding_box() const
 {
     BoundingBoxf3 bb = volumes_bounding_box();
-    bb.merge(m_bed.get_bounding_box(true));
-
+    bb.merge(wxGetApp().plater()->get_bed().get_bounding_box(true));
     if (m_config != nullptr)
     {
         double h = m_config->opt_float("max_print_height");
@@ -1811,6 +1853,11 @@ bool GLCanvas3D::is_reload_delayed() const
 
 void GLCanvas3D::enable_layers_editing(bool enable)
 {
+#if ENABLE_SLOPE_RENDERING
+    if (enable && m_slope.is_shown())
+        m_slope.show(false);
+#endif // ENABLE_SLOPE_RENDERING
+
     m_layers_editing.set_enabled(enable);
     const Selection::IndicesList& idxs = m_selection.get_volume_idxs();
     for (unsigned int idx : idxs)
@@ -1859,6 +1906,11 @@ void GLCanvas3D::enable_undoredo_toolbar(bool enable)
     m_undoredo_toolbar.set_enabled(enable);
 }
 
+void GLCanvas3D::enable_collapse_toolbar(bool enable)
+{
+    m_collapse_toolbar.set_enabled(enable);
+}
+
 void GLCanvas3D::enable_dynamic_background(bool enable)
 {
     m_dynamic_background_enabled = enable;
@@ -1871,7 +1923,7 @@ void GLCanvas3D::allow_multisample(bool allow)
 
 void GLCanvas3D::zoom_to_bed()
 {
-    _zoom_to_box(m_bed.get_bounding_box(false));
+    _zoom_to_box(wxGetApp().plater()->get_bed().get_bounding_box(false));
 }
 
 void GLCanvas3D::zoom_to_volumes()
@@ -1889,7 +1941,7 @@ void GLCanvas3D::zoom_to_selection()
 
 void GLCanvas3D::select_view(const std::string& direction)
 {
-    m_camera.select_view(direction);
+    wxGetApp().plater()->get_camera().select_view(direction);
     if (m_canvas != nullptr)
         m_canvas->Refresh();
 }
@@ -1917,14 +1969,17 @@ void GLCanvas3D::render()
         return;
 
     // ensures this canvas is current and initialized
-    if (! _is_shown_on_screen() || !_set_current() || !_3DScene::init(m_canvas))
+    if (!_is_shown_on_screen() || !_set_current() || !wxGetApp().init_opengl())
+        return;
+
+    if (!is_initialized() && !init())
         return;
 
 #if ENABLE_RENDER_STATISTICS
     auto start_time = std::chrono::high_resolution_clock::now();
 #endif // ENABLE_RENDER_STATISTICS
 
-    if (m_bed.get_shape().empty())
+    if (wxGetApp().plater()->get_bed().get_shape().empty())
     {
         // this happens at startup when no data is still saved under <>\AppData\Roaming\Slic3rPE
         post_event(SimpleEvent(EVT_GLCANVAS_UPDATE_BED_SHAPE));
@@ -1936,17 +1991,18 @@ void GLCanvas3D::render()
     // to preview, this was called before canvas had its final size. It reported zero width
     // and the viewport was set incorrectly, leading to tripping glAsserts further down
     // the road (in apply_projection). That's why the minimum size is forced to 10.
-    m_camera.apply_viewport(0, 0, std::max(10u, (unsigned int)cnv_size.get_width()), std::max(10u, (unsigned int)cnv_size.get_height()));
+    Camera& camera = wxGetApp().plater()->get_camera();
+    camera.apply_viewport(0, 0, std::max(10u, (unsigned int)cnv_size.get_width()), std::max(10u, (unsigned int)cnv_size.get_height()));
 
-    if (m_camera.requires_zoom_to_bed)
+    if (camera.requires_zoom_to_bed)
     {
         zoom_to_bed();
         _resize((unsigned int)cnv_size.get_width(), (unsigned int)cnv_size.get_height());
-        m_camera.requires_zoom_to_bed = false;
+        camera.requires_zoom_to_bed = false;
     }
 
-    m_camera.apply_view_matrix();
-    m_camera.apply_projection(_max_bounding_box(true, true));
+    camera.apply_view_matrix();
+    camera.apply_projection(_max_bounding_box(true, true));
 
     GLfloat position_cam[4] = { 1.0f, 0.0f, 1.0f, 0.0f };
     glsafe(::glLightfv(GL_LIGHT1, GL_POSITION, position_cam));
@@ -1976,7 +2032,7 @@ void GLCanvas3D::render()
     _render_objects();
     _render_sla_slices();
     _render_selection();
-    _render_bed(!m_camera.is_looking_downward(), true);
+    _render_bed(!camera.is_looking_downward(), true);
 
 #if ENABLE_RENDER_SELECTION_CENTER
     _render_selection_center();
@@ -1985,7 +2041,7 @@ void GLCanvas3D::render()
     // we need to set the mouse's scene position here because the depth buffer
     // could be invalidated by the following gizmo render methods
     // this position is used later into on_mouse() to drag the objects
-    m_mouse.scene_position = _mouse_to_3d(m_mouse.position.cast<int>());
+    m_mouse.scene_position = _mouse_to_3d(m_mouse.position.cast<coord_t>());
 
     _render_current_gizmo();
     _render_selection_sidebar_hints();
@@ -2014,10 +2070,10 @@ void GLCanvas3D::render()
     ImGui::Separator();
     imgui.text("Compressed textures: ");
     ImGui::SameLine();
-    imgui.text(GLCanvas3DManager::are_compressed_textures_supported() ? "supported" : "not supported");
+    imgui.text(OpenGLManager::are_compressed_textures_supported() ? "supported" : "not supported");
     imgui.text("Max texture size: ");
     ImGui::SameLine();
-    imgui.text(std::to_string(GLCanvas3DManager::get_gl_info().get_max_tex_size()));
+    imgui.text(std::to_string(OpenGLManager::get_gl_info().get_max_tex_size()));
     imgui.end();
 #endif // ENABLE_RENDER_STATISTICS
 
@@ -2045,16 +2101,15 @@ void GLCanvas3D::render()
 	        tooltip = m_undoredo_toolbar.get_tooltip();
 
 	    if (tooltip.empty())
-	        tooltip = m_view_toolbar.get_tooltip();
-	}
+	        tooltip = m_collapse_toolbar.get_tooltip();
+
+	    if (tooltip.empty())
+            tooltip = wxGetApp().plater()->get_view_toolbar().get_tooltip();
+    }
 
     set_tooltip(tooltip);
 
-#if ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
     m_tooltip.render(m_mouse.position, *this);
-#else
-    m_tooltip.render(m_mouse.position);
-#endif // ENABLE_CANVAS_DELAYED_TOOLTIP_USING_IMGUI
 #endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 
     wxGetApp().plater()->get_mouse3d_controller().render_settings_dialog(*this);
@@ -2084,23 +2139,24 @@ void GLCanvas3D::render()
         tooltip = m_undoredo_toolbar.get_tooltip();
 
     if (tooltip.empty())
+        tooltip = m_collapse_toolbar.get_tooltip();
+
+    if (tooltip.empty())
         tooltip = m_view_toolbar.get_tooltip();
 
     set_tooltip(tooltip);
 #endif // !ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 }
 
-#if ENABLE_THUMBNAIL_GENERATOR
 void GLCanvas3D::render_thumbnail(ThumbnailData& thumbnail_data, unsigned int w, unsigned int h, bool printable_only, bool parts_only, bool show_bed, bool transparent_background) const
 {
-    switch (GLCanvas3DManager::get_framebuffers_type())
+    switch (OpenGLManager::get_framebuffers_type())
     {
-    case GLCanvas3DManager::FB_Arb: { _render_thumbnail_framebuffer(thumbnail_data, w, h, printable_only, parts_only, show_bed, transparent_background); break; }
-    case GLCanvas3DManager::FB_Ext: { _render_thumbnail_framebuffer_ext(thumbnail_data, w, h, printable_only, parts_only, show_bed, transparent_background); break; }
+    case OpenGLManager::EFramebufferType::Arb: { _render_thumbnail_framebuffer(thumbnail_data, w, h, printable_only, parts_only, show_bed, transparent_background); break; }
+    case OpenGLManager::EFramebufferType::Ext: { _render_thumbnail_framebuffer_ext(thumbnail_data, w, h, printable_only, parts_only, show_bed, transparent_background); break; }
     default: { _render_thumbnail_legacy(thumbnail_data, w, h, printable_only, parts_only, show_bed, transparent_background); break; }
     }
 }
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
 void GLCanvas3D::select_all()
 {
@@ -2202,8 +2258,10 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
     if ((m_canvas == nullptr) || (m_config == nullptr) || (m_model == nullptr))
         return;
 
-    if (m_initialized)
-        _set_current();
+    if (!m_initialized)
+        return;
+    
+    _set_current();
 
     struct ModelVolumeState {
         ModelVolumeState(const GLVolume* volume) :
@@ -2799,8 +2857,9 @@ void GLCanvas3D::on_idle(wxIdleEvent& evt)
 
     m_dirty |= m_main_toolbar.update_items_state();
     m_dirty |= m_undoredo_toolbar.update_items_state();
-    m_dirty |= m_view_toolbar.update_items_state();
-    bool mouse3d_controller_applied = wxGetApp().plater()->get_mouse3d_controller().apply(m_camera);
+    m_dirty |= m_collapse_toolbar.update_items_state();
+    m_dirty |= wxGetApp().plater()->get_view_toolbar().update_items_state();
+    bool mouse3d_controller_applied = wxGetApp().plater()->get_mouse3d_controller().apply(wxGetApp().plater()->get_camera());
     m_dirty |= mouse3d_controller_applied;
 
     if (!m_dirty)
@@ -2833,7 +2892,7 @@ void GLCanvas3D::on_char(wxKeyEvent& evt)
         return;
     }
 
-    if ((keyCode == WXK_ESCAPE) && _deactivate_undo_redo_toolbar_items())
+    if ((keyCode == WXK_ESCAPE) && (_deactivate_undo_redo_toolbar_items() || _deactivate_search_toolbar_item()))
         return;
 
     if (m_gizmos.on_char(evt))
@@ -2861,18 +2920,15 @@ void GLCanvas3D::on_char(wxKeyEvent& evt)
             post_event(SimpleEvent(EVT_GLTOOLBAR_COPY));
         break;
 
-#ifdef __APPLE__
-        case 'm':
-        case 'M':
-#else /* __APPLE__ */
+#ifdef __linux__
         case WXK_CONTROL_M:
-#endif /* __APPLE__ */
-            {
-                Mouse3DController& controller = wxGetApp().plater()->get_mouse3d_controller();
-                controller.show_settings_dialog(!controller.is_settings_dialog_shown());
-                m_dirty = true;
-                break;
-            }
+        {
+            Mouse3DController& controller = wxGetApp().plater()->get_mouse3d_controller();
+            controller.show_settings_dialog(!controller.is_settings_dialog_shown());
+            m_dirty = true;
+            break;
+        }
+#endif /* __linux__ */
 
 #ifdef __APPLE__
         case 'v':
@@ -2882,6 +2938,16 @@ void GLCanvas3D::on_char(wxKeyEvent& evt)
 #endif /* __APPLE__ */
             post_event(SimpleEvent(EVT_GLTOOLBAR_PASTE));
         break;
+
+
+#ifdef __APPLE__
+        case 'f':
+        case 'F':
+#else /* __APPLE__ */
+        case WXK_CONTROL_F:
+#endif /* __APPLE__ */
+            _activate_search_toolbar_item();
+            break;
 
 
 #ifdef __APPLE__
@@ -2941,12 +3007,23 @@ void GLCanvas3D::on_char(wxKeyEvent& evt)
         case 'a': { post_event(SimpleEvent(EVT_GLCANVAS_ARRANGE)); break; }
         case 'B':
         case 'b': { zoom_to_bed(); break; }
+#if ENABLE_SLOPE_RENDERING
+        case 'D':
+        case 'd': {
+                    if (!is_layers_editing_enabled())
+                    {
+                        m_slope.show(!m_slope.is_shown());
+                        m_dirty = true;
+                    }
+                    break;
+                  }
+#endif // ENABLE_SLOPE_RENDERING
         case 'E':
         case 'e': { m_labels.show(!m_labels.is_shown()); m_dirty = true; break; }
         case 'I':
         case 'i': { _update_camera_zoom(1.0); break; }
         case 'K':
-        case 'k': { m_camera.select_next_type(); m_dirty = true; break; }
+        case 'k': { wxGetApp().plater()->get_camera().select_next_type(); m_dirty = true; break; }
         case 'O':
         case 'o': { _update_camera_zoom(-1.0); break; }
 #if ENABLE_RENDER_PICKING_PASS
@@ -3073,7 +3150,7 @@ void GLCanvas3D::on_key(wxKeyEvent& evt)
             Vec3d displacement;
             if (camera_space)
             {
-                Eigen::Matrix<double, 3, 3, Eigen::DontAlign> inv_view_3x3 = m_camera.get_view_matrix().inverse().matrix().block(0, 0, 3, 3);
+                Eigen::Matrix<double, 3, 3, Eigen::DontAlign> inv_view_3x3 = wxGetApp().plater()->get_camera().get_view_matrix().inverse().matrix().block(0, 0, 3, 3);
                 displacement = multiplier * (inv_view_3x3 * direction);
                 displacement(2) = 0.0;
             }
@@ -3264,6 +3341,15 @@ void GLCanvas3D::on_mouse_wheel(wxMouseEvent& evt)
         }
     }
 
+    // If the Search window or Undo/Redo list is opened, 
+    // update them according to the event
+    if (m_main_toolbar.is_item_pressed("search")    || 
+        m_undoredo_toolbar.is_item_pressed("undo")  || 
+        m_undoredo_toolbar.is_item_pressed("redo")) {
+        m_mouse_wheel = int((double)evt.GetWheelRotation() / (double)evt.GetWheelDelta());
+        return;
+    }
+
     // Inform gizmos about the event so they have the opportunity to react.
     if (m_gizmos.on_mouse_wheel(evt))
         return;
@@ -3340,10 +3426,17 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
     Point pos(evt.GetX(), evt.GetY());
 
     ImGuiWrapper* imgui = wxGetApp().imgui();
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+    if (m_tooltip.is_in_imgui() && evt.LeftUp())
+        // ignore left up events coming from imgui windows and not processed by them
+        m_mouse.ignore_left_up = true;
     m_tooltip.set_in_imgui(false);
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     if (imgui->update_mouse_data(evt)) {
         m_mouse.position = evt.Leaving() ? Vec2d(-1.0, -1.0) : pos.cast<double>();
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
         m_tooltip.set_in_imgui(true);
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
         render();
 #ifdef SLIC3R_DEBUG_MOUSE_EVENTS
         printf((format_mouse_event_debug_message(evt) + " - Consumed by ImGUI\n").c_str());
@@ -3351,10 +3444,11 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
         // do not return if dragging or tooltip not empty to allow for tooltip update
 #if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
         if (!m_mouse.dragging && m_tooltip.is_empty())
+            return;
 #else
         if (!m_mouse.dragging && m_canvas->GetToolTipText().empty())
-#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
             return;
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     }
 
 #ifdef __WXMSW__
@@ -3391,7 +3485,15 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
         return;
     }
 
-    if (m_view_toolbar.on_mouse(evt, *this))
+    if (m_collapse_toolbar.on_mouse(evt, *this))
+    {
+        if (evt.LeftUp() || evt.MiddleUp() || evt.RightUp())
+            mouse_up_cleanup();
+        m_mouse.set_start_position_3D_as_invalid();
+        return;
+    }
+
+    if (wxGetApp().plater()->get_view_toolbar().on_mouse(evt, *this))
     {
         if (evt.LeftUp() || evt.MiddleUp() || evt.RightUp())
             mouse_up_cleanup();
@@ -3452,6 +3554,7 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
     else if (evt.Leaving())
     {
         _deactivate_undo_redo_toolbar_items();
+        _deactivate_search_toolbar_item();
 
         // to remove hover on objects when the mouse goes out of this canvas
         m_mouse.position = Vec2d(-1.0, -1.0);
@@ -3459,7 +3562,7 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
     }
     else if (evt.LeftDown() || evt.RightDown() || evt.MiddleDown())
     {
-        if (_deactivate_undo_redo_toolbar_items())
+        if (_deactivate_undo_redo_toolbar_items() || _deactivate_search_toolbar_item())
             return;
 
         // If user pressed left or right button we first check whether this happened
@@ -3554,7 +3657,8 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
             // we do not want to translate objects if the user just clicked on an object while pressing shift to remove it from the selection and then drag
             if (m_selection.contains_volume(get_first_hover_volume_idx()))
             {
-                if (std::abs(m_camera.get_dir_forward()(2)) < EPSILON)
+                const Camera& camera = wxGetApp().plater()->get_camera();
+                if (std::abs(camera.get_dir_forward()(2)) < EPSILON)
                 {
                     // side view -> move selected volumes orthogonally to camera view direction
                     Linef3 ray = mouse_ray(pos);
@@ -3567,8 +3671,8 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
                     // vector from the starting position to the found intersection
                     Vec3d inters_vec = inters - m_mouse.drag.start_position_3D;
 
-                    Vec3d camera_right = m_camera.get_dir_right();
-                    Vec3d camera_up = m_camera.get_dir_up();
+                    Vec3d camera_right = camera.get_dir_right();
+                    Vec3d camera_up = camera.get_dir_up();
 
                     // finds projection of the vector along the camera axes
                     double projection_x = inters_vec.dot(camera_right);
@@ -3603,9 +3707,11 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
 
         if ((m_layers_editing.state != LayersEditing::Unknown) && (layer_editing_object_idx != -1))
         {
-            set_tooltip("");
             if (m_layers_editing.state == LayersEditing::Editing)
+            {
                 _perform_layer_editing_action(&evt);
+                m_mouse.position = pos.cast<double>();
+            }
         }
         // do not process the dragging if the left mouse was set down in another canvas
         else if (evt.LeftIsDown())
@@ -3614,26 +3720,19 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
             if (m_hover_volume_idxs.empty() && m_mouse.is_start_position_3D_defined())
             {
                 const Vec3d rot = (Vec3d(pos.x(), pos.y(), 0.) - m_mouse.drag.start_position_3D) * (PI * TRACKBALLSIZE / 180.);
-#if ENABLE_AUTO_CONSTRAINED_CAMERA
                 if (wxGetApp().app_config->get("use_free_camera") == "1")
                     // Virtual track ball (similar to the 3DConnexion mouse).
-                    m_camera.rotate_local_around_target(Vec3d(rot.y(), rot.x(), 0.));
+                    wxGetApp().plater()->get_camera().rotate_local_around_target(Vec3d(rot.y(), rot.x(), 0.));
                 else
                 {
-                	// Forces camera right vector to be parallel to XY plane in case it has been misaligned using the 3D mouse free rotation.
-                	// It is cheaper to call this function right away instead of testing wxGetApp().plater()->get_mouse3d_controller().connected(),
-                	// which checks an atomics (flushes CPU caches).
-                	// See GH issue #3816.
-                    m_camera.recover_from_free_camera();
-                    m_camera.rotate_on_sphere(rot.x(), rot.y(), wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology() != ptSLA);
+                    // Forces camera right vector to be parallel to XY plane in case it has been misaligned using the 3D mouse free rotation.
+                    // It is cheaper to call this function right away instead of testing wxGetApp().plater()->get_mouse3d_controller().connected(),
+                    // which checks an atomics (flushes CPU caches).
+                    // See GH issue #3816.
+                    Camera& camera = wxGetApp().plater()->get_camera();
+                    camera.recover_from_free_camera();
+                    camera.rotate_on_sphere(rot.x(), rot.y(), wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology() != ptSLA);
                 }
-#else
-                if (wxGetApp().plater()->get_mouse3d_controller().connected() || (wxGetApp().app_config->get("use_free_camera") == "1"))
-                    // Virtual track ball (similar to the 3DConnexion mouse).
-                    m_camera.rotate_local_around_target(Vec3d(rot.y(), rot.x(), 0.));
-                else
-                    m_camera.rotate_on_sphere(rot.x(), rot.y(), wxGetApp().preset_bundle->printers.get_edited_preset().printer_technology() != ptSLA);
-#endif // ENABLE_AUTO_CONSTRAINED_CAMERA
 
                 m_dirty = true;
             }
@@ -3648,19 +3747,18 @@ void GLCanvas3D::on_mouse(wxMouseEvent& evt)
                 float z = 0.0f;
                 const Vec3d& cur_pos = _mouse_to_3d(pos, &z);
                 Vec3d orig = _mouse_to_3d(m_mouse.drag.start_position_2D, &z);
-#if ENABLE_AUTO_CONSTRAINED_CAMERA
+                Camera& camera = wxGetApp().plater()->get_camera();
                 if (wxGetApp().app_config->get("use_free_camera") != "1")
-                	// Forces camera right vector to be parallel to XY plane in case it has been misaligned using the 3D mouse free rotation.
-                	// It is cheaper to call this function right away instead of testing wxGetApp().plater()->get_mouse3d_controller().connected(),
-                	// which checks an atomics (flushes CPU caches).
-                	// See GH issue #3816.
-                    m_camera.recover_from_free_camera();
-#endif // ENABLE_AUTO_CONSTRAINED_CAMERA
+                    // Forces camera right vector to be parallel to XY plane in case it has been misaligned using the 3D mouse free rotation.
+                    // It is cheaper to call this function right away instead of testing wxGetApp().plater()->get_mouse3d_controller().connected(),
+                    // which checks an atomics (flushes CPU caches).
+                    // See GH issue #3816.
+                    camera.recover_from_free_camera();
 
-                m_camera.set_target(m_camera.get_target() + orig - cur_pos);
+                camera.set_target(camera.get_target() + orig - cur_pos);
                 m_dirty = true;
             }
-            
+
             m_mouse.drag.start_position_2D = pos;
         }
     }
@@ -4106,10 +4204,14 @@ void GLCanvas3D::update_ui_from_settings()
     if (new_scaling != orig_scaling) {
         BOOST_LOG_TRIVIAL(debug) << "GLCanvas3D: Scaling factor: " << new_scaling;
 
-        m_camera.set_zoom(m_camera.get_zoom() * new_scaling / orig_scaling);
+        Camera& camera = wxGetApp().plater()->get_camera();
+        camera.set_zoom(camera.get_zoom() * new_scaling / orig_scaling);
         _refresh_if_shown_on_screen();
     }
-#endif
+#endif // ENABLE_RETINA_GL
+
+    bool enable_collapse = wxGetApp().app_config->get("show_collapse_button") == "1";
+    enable_collapse_toolbar(enable_collapse);
 }
 
 
@@ -4141,7 +4243,7 @@ Linef3 GLCanvas3D::mouse_ray(const Point& mouse_pos)
 
 double GLCanvas3D::get_size_proportional_to_max_bed_size(double factor) const
 {
-    return factor * m_bed.get_bounding_box(false).max_size();
+    return factor * wxGetApp().plater()->get_bed().get_bounding_box(false).max_size();
 }
 
 void GLCanvas3D::set_cursor(ECursorType type)
@@ -4161,6 +4263,16 @@ void GLCanvas3D::set_cursor(ECursorType type)
 void GLCanvas3D::msw_rescale()
 {
     m_warning_texture.msw_rescale(*this);
+}
+
+void GLCanvas3D::update_tooltip_for_settings_item_in_main_toolbar()
+{
+    std::string new_tooltip = _u8L("Switch to Settings") + 
+                             "\n" + "[" + GUI::shortkey_ctrl_prefix() + "2] - " + _u8L("Print Settings Tab")    + 
+                             "\n" + "[" + GUI::shortkey_ctrl_prefix() + "3] - " + (m_process->current_printer_technology() == ptFFF ? _u8L("Filament Settings Tab") : _u8L("Material Settings Tab")) +
+                             "\n" + "[" + GUI::shortkey_ctrl_prefix() + "4] - " + _u8L("Printer Settings Tab") ;
+
+    m_main_toolbar.set_tooltip(get_main_toolbar_item_id("settings"), new_tooltip);
 }
 
 bool GLCanvas3D::has_toolpaths_to_export() const
@@ -4198,11 +4310,13 @@ static bool string_getter(const bool is_undo, int idx, const char** out_text)
     return wxGetApp().plater()->undo_redo_string_getter(is_undo, idx, out_text);
 }
 
-void GLCanvas3D::_render_undo_redo_stack(const bool is_undo, float pos_x) const
+bool GLCanvas3D::_render_undo_redo_stack(const bool is_undo, float pos_x) const
 {
+    bool action_taken = false;
+
     ImGuiWrapper* imgui = wxGetApp().imgui();
 
-    const float x = pos_x * (float)get_camera().get_zoom() + 0.5f * (float)get_canvas_size().get_width();
+    const float x = pos_x * (float)wxGetApp().plater()->get_camera().get_zoom() + 0.5f * (float)get_canvas_size().get_width();
     imgui->set_next_window_pos(x, m_undoredo_toolbar.get_height(), ImGuiCond_Always, 0.5f, 0.0f);
     std::string title = is_undo ? L("Undo History") : L("Redo History");
     imgui->begin(_(title), ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
@@ -4214,20 +4328,78 @@ void GLCanvas3D::_render_undo_redo_stack(const bool is_undo, float pos_x) const
 	em *= m_retina_helper->get_scale_factor();
 #endif
 
-    if (imgui->undo_redo_list(ImVec2(18 * em, 26 * em), is_undo, &string_getter, hovered, selected))
+    if (imgui->undo_redo_list(ImVec2(18 * em, 26 * em), is_undo, &string_getter, hovered, selected, m_mouse_wheel))
         m_imgui_undo_redo_hovered_pos = hovered;
     else
         m_imgui_undo_redo_hovered_pos = -1;
 
     if (selected >= 0)
+    {
         is_undo ? wxGetApp().plater()->undo_to(selected) : wxGetApp().plater()->redo_to(selected);
+        action_taken = true;
+    }
 
     imgui->text(wxString::Format(is_undo ? _L_PLURAL("Undo %1$d Action", "Undo %1$d Actions", hovered + 1) : _L_PLURAL("Redo %1$d Action", "Redo %1$d Actions", hovered + 1), hovered + 1));
 
     imgui->end();
+
+    return action_taken;
 }
 
-#if ENABLE_THUMBNAIL_GENERATOR
+// Getter for the const char*[] for the search list 
+static bool search_string_getter(int idx, const char** label, const char** tooltip)
+{
+    return wxGetApp().plater()->search_string_getter(idx, label, tooltip);
+}
+
+bool GLCanvas3D::_render_search_list(float pos_x) const
+{
+    bool action_taken = false;
+    ImGuiWrapper* imgui = wxGetApp().imgui();
+
+    const float x = pos_x * (float)wxGetApp().plater()->get_camera().get_zoom() + 0.5f * (float)get_canvas_size().get_width();
+    imgui->set_next_window_pos(x, m_main_toolbar.get_height(), ImGuiCond_Always, 0.5f, 0.0f);
+    std::string title = L("Search");
+    imgui->begin(_(title), ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+
+    int selected = -1;
+    bool edited = false;
+    bool check_changed = false;
+    float em = static_cast<float>(wxGetApp().em_unit());
+#if ENABLE_RETINA_GL
+	em *= m_retina_helper->get_scale_factor();
+#endif // ENABLE_RETINA_GL
+
+    Sidebar& sidebar = wxGetApp().sidebar();
+
+    std::string& search_line = sidebar.get_search_line();
+    char *s = new char[255];
+    strcpy(s, search_line.empty() ? _u8L("Type here to search").c_str() : search_line.c_str());
+
+    imgui->search_list(ImVec2(45 * em, 30 * em), &search_string_getter, s, 
+                       sidebar.get_searcher().view_params,
+                       selected, edited, m_mouse_wheel);
+
+    search_line = s;
+    delete [] s;
+    if (search_line == _u8L("Type here to search"))
+        search_line.clear();
+
+    if (edited)
+        sidebar.search();
+
+    if (selected != size_t(-1)) {
+        // selected == 9999 means that Esc kye was pressed
+        if (selected != 9999)
+            sidebar.jump_to_option(selected);
+        action_taken = true;
+    }
+
+    imgui->end();
+
+    return action_taken;
+}
+
 #define ENABLE_THUMBNAIL_GENERATOR_DEBUG_OUTPUT 0
 #if ENABLE_THUMBNAIL_GENERATOR_DEBUG_OUTPUT
 static void debug_output_thumbnail(const ThumbnailData& thumbnail_data)
@@ -4298,7 +4470,7 @@ void GLCanvas3D::_render_thumbnail_internal(ThumbnailData& thumbnail_data, bool 
         // extends the near and far z of the frustrum to avoid the bed being clipped
 
         // box in eye space
-        BoundingBoxf3 t_bed_box = m_bed.get_bounding_box(true).transformed(camera.get_view_matrix());
+        BoundingBoxf3 t_bed_box = wxGetApp().plater()->get_bed().get_bounding_box(true).transformed(camera.get_view_matrix());
         near_z = -t_bed_box.max(2);
         far_z = -t_bed_box.min(2);
     }
@@ -4575,9 +4747,8 @@ void GLCanvas3D::_render_thumbnail_legacy(ThumbnailData& thumbnail_data, unsigne
 #endif // ENABLE_THUMBNAIL_GENERATOR_DEBUG_OUTPUT
 
     // restore the default framebuffer size to avoid flickering on the 3D scene
-    m_camera.apply_viewport(0, 0, cnv_size.get_width(), cnv_size.get_height());
+    wxGetApp().plater()->get_camera().apply_viewport(0, 0, cnv_size.get_width(), cnv_size.get_height());
 }
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
 bool GLCanvas3D::_init_toolbars()
 {
@@ -4588,6 +4759,9 @@ bool GLCanvas3D::_init_toolbars()
         return false;
 
     if (!_init_view_toolbar())
+        return false;
+
+    if (!_init_collapse_toolbar())
         return false;
 
     return true;
@@ -4728,10 +4902,26 @@ bool GLCanvas3D::_init_main_toolbar()
     if (!m_main_toolbar.add_separator())
         return false;
 
+    item.name = "settings";
+    item.icon_filename = "cog.svg";
+    item.tooltip = _u8L("Switch to Settings") + "\n" + "[" + GUI::shortkey_ctrl_prefix() + "2] - " + _u8L("Print Settings Tab")    + 
+                                                "\n" + "[" + GUI::shortkey_ctrl_prefix() + "3] - " + (m_process->current_printer_technology() == ptFFF ? _u8L("Filament Settings Tab") : _u8L("Material Settings Tab")) +
+                                                "\n" + "[" + GUI::shortkey_ctrl_prefix() + "4] - " + _u8L("Printer Settings Tab") ;
+    item.sprite_id = 10;
+    item.enabling_callback    = GLToolbarItem::Default_Enabling_Callback;
+    item.visibility_callback  = [this]() { return (wxGetApp().app_config->get("new_settings_layout_mode") == "1" ||
+                                                   wxGetApp().app_config->get("dlg_settings_layout_mode") == "1"); };
+    item.left.action_callback = [this]() { wxGetApp().mainframe->select_tab(); };
+    if (!m_main_toolbar.add_item(item))
+        return false;
+
+    if (!m_main_toolbar.add_separator())
+        return false;
+
     item.name = "layersediting";
     item.icon_filename = "layers_white.svg";
     item.tooltip = _utf8(L("Variable layer height"));
-    item.sprite_id = 10;
+    item.sprite_id = 11;
     item.left.toggable = true;
     item.left.action_callback = [this]() { if (m_canvas != nullptr) wxPostEvent(m_canvas, SimpleEvent(EVT_GLTOOLBAR_LAYERSEDITING)); };
     item.visibility_callback = [this]()->bool
@@ -4744,6 +4934,26 @@ bool GLCanvas3D::_init_main_toolbar()
         return res;
     };
     item.enabling_callback = []()->bool { return wxGetApp().plater()->can_layers_editing(); };
+    if (!m_main_toolbar.add_item(item))
+        return false;
+
+    if (!m_main_toolbar.add_separator())
+        return false;
+
+    item.name = "search";
+    item.icon_filename = "search_.svg";
+    item.tooltip = _utf8(L("Search")) + " [" + GUI::shortkey_ctrl_prefix() + "F]";
+    item.sprite_id = 12;
+    item.left.render_callback = [this](float left, float right, float, float) {
+        if (m_canvas != nullptr)
+        {
+            if (_render_search_list(0.5f * (left + right)))
+                _deactivate_search_toolbar_item();
+        }
+    };
+    item.left.action_callback   = GLToolbarItem::Default_Action_Callback;
+    item.visibility_callback    = GLToolbarItem::Default_Visibility_Callback;
+    item.enabling_callback      = GLToolbarItem::Default_Enabling_Callback;
     if (!m_main_toolbar.add_item(item))
         return false;
 
@@ -4781,12 +4991,18 @@ bool GLCanvas3D::_init_undoredo_toolbar()
 
     item.name = "undo";
     item.icon_filename = "undo_toolbar.svg";
-    item.tooltip = _utf8(L("Undo")) + " [" + GUI::shortkey_ctrl_prefix() + "Z]\n" + _utf8(L("Click right mouse button to open History"));
+    item.tooltip = _utf8(L("Undo")) + " [" + GUI::shortkey_ctrl_prefix() + "Z]\n" + _utf8(L("Click right mouse button to open/close History"));
     item.sprite_id = 0;
     item.left.action_callback = [this]() { post_event(SimpleEvent(EVT_GLCANVAS_UNDO)); };
     item.right.toggable = true;
     item.right.action_callback = [this]() { m_imgui_undo_redo_hovered_pos = -1; };
-    item.right.render_callback = [this](float left, float right, float, float) { if (m_canvas != nullptr) _render_undo_redo_stack(true, 0.5f * (left + right)); };
+    item.right.render_callback = [this](float left, float right, float, float) {
+        if (m_canvas != nullptr)
+        {
+            if (_render_undo_redo_stack(true, 0.5f * (left + right)))
+                _deactivate_undo_redo_toolbar_items();
+        }
+    };
     item.enabling_callback = [this]()->bool {
         bool can_undo = wxGetApp().plater()->can_undo();
         int id = m_undoredo_toolbar.get_item_id("undo");
@@ -4814,11 +5030,17 @@ bool GLCanvas3D::_init_undoredo_toolbar()
 
     item.name = "redo";
     item.icon_filename = "redo_toolbar.svg";
-	item.tooltip = _utf8(L("Redo")) + " [" + GUI::shortkey_ctrl_prefix() + "Y]\n" + _utf8(L("Click right mouse button to open History"));
+    item.tooltip = _utf8(L("Redo")) + " [" + GUI::shortkey_ctrl_prefix() + "Y]\n" + _utf8(L("Click right mouse button to open/close History"));
     item.sprite_id = 1;
     item.left.action_callback = [this]() { post_event(SimpleEvent(EVT_GLCANVAS_REDO)); };
     item.right.action_callback = [this]() { m_imgui_undo_redo_hovered_pos = -1; };
-    item.right.render_callback = [this](float left, float right, float, float) { if (m_canvas != nullptr) _render_undo_redo_stack(false, 0.5f * (left + right)); };
+    item.right.render_callback = [this](float left, float right, float, float) {
+        if (m_canvas != nullptr)
+        {
+            if (_render_undo_redo_stack(false, 0.5f * (left + right)))
+                _deactivate_undo_redo_toolbar_items();
+        }
+    };
     item.enabling_callback = [this]()->bool {
         bool can_redo = wxGetApp().plater()->can_redo();
         int id = m_undoredo_toolbar.get_item_id("redo");
@@ -4844,12 +5066,64 @@ bool GLCanvas3D::_init_undoredo_toolbar()
     if (!m_undoredo_toolbar.add_item(item))
         return false;
 
+    if (!m_undoredo_toolbar.add_separator())
+        return false;
+
     return true;
 }
 
 bool GLCanvas3D::_init_view_toolbar()
 {
     return wxGetApp().plater()->init_view_toolbar();
+}
+
+bool GLCanvas3D::_init_collapse_toolbar()
+{
+    if (!m_collapse_toolbar.is_enabled() && m_collapse_toolbar.get_items_count() > 0)
+        return true;
+
+    BackgroundTexture::Metadata background_data;
+    background_data.filename = "toolbar_background.png";
+    background_data.left = 16;
+    background_data.top = 16;
+    background_data.right = 16;
+    background_data.bottom = 16;
+
+    if (!m_collapse_toolbar.init(background_data))
+    {
+        // unable to init the toolbar texture, disable it
+        m_collapse_toolbar.set_enabled(false);
+        return true;
+    }
+
+    m_collapse_toolbar.set_layout_type(GLToolbar::Layout::Vertical);
+    m_collapse_toolbar.set_horizontal_orientation(GLToolbar::Layout::HO_Right);
+    m_collapse_toolbar.set_vertical_orientation(GLToolbar::Layout::VO_Top);
+    m_collapse_toolbar.set_border(5.0f);
+    m_collapse_toolbar.set_separator_size(5);
+    m_collapse_toolbar.set_gap_size(2);
+
+    GLToolbarItem::Data item;
+
+    item.name = "collapse_sidebar";
+    item.icon_filename = "collapse.svg";
+    item.tooltip =  wxGetApp().plater()->is_sidebar_collapsed() ? _utf8(L("Expand right panel")) : _utf8(L("Collapse right panel"));
+    item.sprite_id = 0;
+    item.left.action_callback = [this, item]() {
+        std::string new_tooltip = wxGetApp().plater()->is_sidebar_collapsed() ?
+            _utf8(L("Collapse right panel")) : _utf8(L("Expand right panel"));
+
+        int id = m_collapse_toolbar.get_item_id("collapse_sidebar");
+        m_collapse_toolbar.set_tooltip(id, new_tooltip);
+        set_tooltip("");
+
+        wxGetApp().plater()->collapse_sidebar(!wxGetApp().plater()->is_sidebar_collapsed());
+    };
+
+    if (!m_collapse_toolbar.add_item(item))
+        return false;
+
+    return true;
 }
 
 bool GLCanvas3D::_set_current()
@@ -4889,28 +5163,19 @@ BoundingBoxf3 GLCanvas3D::_max_bounding_box(bool include_gizmos, bool include_be
         bb.merge(BoundingBoxf3(sel_bb_center - extend_by, sel_bb_center + extend_by));
     }
 
-    bb.merge(m_bed.get_bounding_box(include_bed_model));
+    bb.merge(wxGetApp().plater()->get_bed().get_bounding_box(include_bed_model));
     return bb;
 }
 
-#if ENABLE_THUMBNAIL_GENERATOR
 void GLCanvas3D::_zoom_to_box(const BoundingBoxf3& box, double margin_factor)
 {
-    m_camera.zoom_to_box(box, margin_factor);
+    wxGetApp().plater()->get_camera().zoom_to_box(box, margin_factor);
     m_dirty = true;
 }
-#else
-void GLCanvas3D::_zoom_to_box(const BoundingBoxf3& box)
-{
-    const Size& cnv_size = get_canvas_size();
-    m_camera.zoom_to_box(box, cnv_size.get_width(), cnv_size.get_height());
-    m_dirty = true;
-}
-#endif // ENABLE_THUMBNAIL_GENERATOR
 
 void GLCanvas3D::_update_camera_zoom(double zoom)
 {
-    m_camera.update_zoom(zoom);
+    wxGetApp().plater()->get_camera().update_zoom(zoom);
     m_dirty = true;
 }
 
@@ -4946,7 +5211,7 @@ void GLCanvas3D::_picking_pass() const
 
         glsafe(::glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 
-        m_camera_clipping_plane = m_gizmos.get_sla_clipping_plane();
+        m_camera_clipping_plane = m_gizmos.get_clipping_plane();
         if (m_camera_clipping_plane.is_active()) {
             ::glClipPlane(GL_CLIP_PLANE0, (GLdouble*)m_camera_clipping_plane.get_data());
             ::glEnable(GL_CLIP_PLANE0);
@@ -5095,13 +5360,18 @@ void GLCanvas3D::_render_background() const
     glsafe(::glPopMatrix());
 }
 
-void GLCanvas3D::_render_bed(float theta, bool show_axes) const
+void GLCanvas3D::_render_bed(bool bottom, bool show_axes) const
 {
     float scale_factor = 1.0;
 #if ENABLE_RETINA_GL
     scale_factor = m_retina_helper->get_scale_factor();
 #endif // ENABLE_RETINA_GL
-    m_bed.render(const_cast<GLCanvas3D&>(*this), theta, scale_factor, show_axes);
+
+    bool show_texture = ! bottom ||
+            (m_gizmos.get_current_type() != GLGizmosManager::FdmSupports
+          && m_gizmos.get_current_type() != GLGizmosManager::SlaSupports);
+
+    wxGetApp().plater()->get_bed().render(const_cast<GLCanvas3D&>(*this), bottom, scale_factor, show_axes, show_texture);
 }
 
 void GLCanvas3D::_render_objects() const
@@ -5109,12 +5379,9 @@ void GLCanvas3D::_render_objects() const
     if (m_volumes.empty())
         return;
 
-#if !ENABLE_THUMBNAIL_GENERATOR
-    glsafe(::glEnable(GL_LIGHTING));
-#endif // !ENABLE_THUMBNAIL_GENERATOR
     glsafe(::glEnable(GL_DEPTH_TEST));
 
-    m_camera_clipping_plane = m_gizmos.get_sla_clipping_plane();
+    m_camera_clipping_plane = m_gizmos.get_clipping_plane();
 
     if (m_picking_enabled)
     {
@@ -5123,7 +5390,7 @@ void GLCanvas3D::_render_objects() const
 
         if (m_config != nullptr)
         {
-            const BoundingBoxf3& bed_bb = m_bed.get_bounding_box(false);
+            const BoundingBoxf3& bed_bb = wxGetApp().plater()->get_bed().get_bounding_box(false);
             m_volumes.set_print_box((float)bed_bb.min(0), (float)bed_bb.min(1), 0.0f, (float)bed_bb.max(0), (float)bed_bb.max(1), (float)m_config->opt_float("max_print_height"));
             m_volumes.check_outside_state(m_config, nullptr);
         }
@@ -5139,25 +5406,23 @@ void GLCanvas3D::_render_objects() const
     m_shader.start_using();
     if (m_picking_enabled && !m_gizmos.is_dragging() && m_layers_editing.is_enabled() && (m_layers_editing.last_object_id != -1) && (m_layers_editing.object_max_z() > 0.0f)) {
         int object_id = m_layers_editing.last_object_id;
-        m_volumes.render(GLVolumeCollection::Opaque, false, m_camera.get_view_matrix(), [object_id](const GLVolume& volume) {
+        m_volumes.render(GLVolumeCollection::Opaque, false, wxGetApp().plater()->get_camera().get_view_matrix(), [object_id](const GLVolume& volume) {
             // Which volume to paint without the layer height profile shader?
             return volume.is_active && (volume.is_modifier || volume.composite_id.object_id != object_id);
-        });
+            });
         // Let LayersEditing handle rendering of the active object using the layer height profile shader.
         m_layers_editing.render_volumes(*this, this->m_volumes);
     } else {
         // do not cull backfaces to show broken geometry, if any
-        m_volumes.render(GLVolumeCollection::Opaque, m_picking_enabled, m_camera.get_view_matrix(), [this](const GLVolume& volume) {
+        m_volumes.render(GLVolumeCollection::Opaque, m_picking_enabled, wxGetApp().plater()->get_camera().get_view_matrix(), [this](const GLVolume& volume) {
             return (m_render_sla_auxiliaries || volume.composite_id.volume_id >= 0);
-        });
+            });
     }
-    m_volumes.render(GLVolumeCollection::Transparent, false, m_camera.get_view_matrix());
+
+    m_volumes.render(GLVolumeCollection::Transparent, false, wxGetApp().plater()->get_camera().get_view_matrix());
     m_shader.stop_using();
 
     m_camera_clipping_plane = ClippingPlane::ClipsNothing();
-#if !ENABLE_THUMBNAIL_GENERATOR
-    glsafe(::glDisable(GL_LIGHTING));
-#endif // !ENABLE_THUMBNAIL_GENERATOR
 }
 
 void GLCanvas3D::_render_selection() const
@@ -5165,7 +5430,7 @@ void GLCanvas3D::_render_selection() const
     float scale_factor = 1.0;
 #if ENABLE_RETINA_GL
     scale_factor = m_retina_helper->get_scale_factor();
-#endif
+#endif // ENABLE_RETINA_GL
 
     if (!m_gizmos.is_running())
         m_selection.render(scale_factor);
@@ -5184,9 +5449,10 @@ void GLCanvas3D::_render_overlays() const
     glsafe(::glPushMatrix());
     glsafe(::glLoadIdentity());
     // ensure that the textures are renderered inside the frustrum
-    glsafe(::glTranslated(0.0, 0.0, -(m_camera.get_near_z() + 0.005)));
+    const Camera& camera = wxGetApp().plater()->get_camera();
+    glsafe(::glTranslated(0.0, 0.0, -(camera.get_near_z() + 0.005)));
     // ensure that the overlay fits the frustrum near z plane
-    double gui_scale = m_camera.get_gui_scale();
+    double gui_scale = camera.get_gui_scale();
     glsafe(::glScaled(gui_scale, gui_scale, 1.0));
 
     _render_gizmos_overlay();
@@ -5199,14 +5465,17 @@ void GLCanvas3D::_render_overlays() const
     const float scale = m_retina_helper->get_scale_factor() * wxGetApp().toolbar_icon_scale(true);
     m_main_toolbar.set_scale(scale);
     m_undoredo_toolbar.set_scale(scale);
+    m_collapse_toolbar.set_scale(scale);
 #else
     const float size = int(GLToolbar::Default_Icons_Size * wxGetApp().toolbar_icon_scale(true));
     m_main_toolbar.set_icons_size(size);
     m_undoredo_toolbar.set_icons_size(size);
+    m_collapse_toolbar.set_icons_size(size);
 #endif // ENABLE_RETINA_GL
 
     _render_main_toolbar();
     _render_undoredo_toolbar();
+    _render_collapse_toolbar();
     _render_view_toolbar();
 
     if ((m_layers_editing.last_object_id >= 0) && (m_layers_editing.object_max_z() > 0.0f))
@@ -5222,6 +5491,10 @@ void GLCanvas3D::_render_overlays() const
             }
     }
     m_labels.render(sorted_instances);
+
+#if ENABLE_SLOPE_RENDERING
+    m_slope.render();
+#endif // ENABLE_SLOPE_RENDERING
 
     glsafe(::glPopMatrix());
 }
@@ -5249,7 +5522,7 @@ void GLCanvas3D::_render_volumes_for_picking() const
     glsafe(::glEnableClientState(GL_VERTEX_ARRAY));
     glsafe(::glEnableClientState(GL_NORMAL_ARRAY));
 
-    const Transform3d& view_matrix = m_camera.get_view_matrix();
+    const Transform3d& view_matrix = wxGetApp().plater()->get_camera().get_view_matrix();
     for (size_t type = 0; type < 2; ++ type) {
 	    GLVolumeWithIdAndZList to_render = volumes_to_render(m_volumes.volumes, (type == 0) ? GLVolumeCollection::Opaque : GLVolumeCollection::Transparent, view_matrix);
 	    for (const GLVolumeWithIdAndZ& volume : to_render)
@@ -5298,7 +5571,7 @@ void GLCanvas3D::_render_main_toolbar() const
         return;
 
     Size cnv_size = get_canvas_size();
-    float inv_zoom = (float)m_camera.get_inv_zoom();
+    float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
 
     float top = 0.5f * (float)cnv_size.get_height() * inv_zoom;
     float left = -0.5f * (m_main_toolbar.get_width() + m_undoredo_toolbar.get_width()) * inv_zoom;
@@ -5313,7 +5586,7 @@ void GLCanvas3D::_render_undoredo_toolbar() const
         return;
 
     Size cnv_size = get_canvas_size();
-    float inv_zoom = (float)m_camera.get_inv_zoom();
+    float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
 
     float top = 0.5f * (float)cnv_size.get_height() * inv_zoom;
     float left = (m_main_toolbar.get_width() - 0.5f * (m_main_toolbar.get_width() + m_undoredo_toolbar.get_width())) * inv_zoom;
@@ -5321,27 +5594,46 @@ void GLCanvas3D::_render_undoredo_toolbar() const
     m_undoredo_toolbar.render(*this);
 }
 
+void GLCanvas3D::_render_collapse_toolbar() const
+{
+    if (!m_collapse_toolbar.is_enabled())
+        return;
+
+    Size cnv_size = get_canvas_size();
+    float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
+
+    float band = m_layers_editing.is_enabled() ? (wxGetApp().imgui()->get_style_scaling() * LayersEditing::THICKNESS_BAR_WIDTH) : 0.0;
+
+    float top  = 0.5f * (float)cnv_size.get_height() * inv_zoom;
+    float left = (0.5f * (float)cnv_size.get_width() - (float)m_collapse_toolbar.get_width() - band) * inv_zoom;
+
+    m_collapse_toolbar.set_position(top, left);
+    m_collapse_toolbar.render(*this);
+}
+
 void GLCanvas3D::_render_view_toolbar() const
 {
+    GLToolbar& view_toolbar = wxGetApp().plater()->get_view_toolbar();
+
 #if ENABLE_RETINA_GL
 //     m_view_toolbar.set_scale(m_retina_helper->get_scale_factor());
     const float scale = m_retina_helper->get_scale_factor() * wxGetApp().toolbar_icon_scale();
-    m_view_toolbar.set_scale(scale); //! #ys_FIXME_experiment
+    view_toolbar.set_scale(scale); //! #ys_FIXME_experiment
 #else
 //     m_view_toolbar.set_scale(m_canvas->GetContentScaleFactor());
 //     m_view_toolbar.set_scale(wxGetApp().em_unit()*0.1f);
     const float size = int(GLGizmosManager::Default_Icons_Size * wxGetApp().toolbar_icon_scale());
-    m_view_toolbar.set_icons_size(size); //! #ys_FIXME_experiment
+    view_toolbar.set_icons_size(size); //! #ys_FIXME_experiment
 #endif // ENABLE_RETINA_GL
 
     Size cnv_size = get_canvas_size();
-    float inv_zoom = (float)m_camera.get_inv_zoom();
+    float inv_zoom = (float)wxGetApp().plater()->get_camera().get_inv_zoom();
 
     // places the toolbar on the bottom-left corner of the 3d scene
-    float top = (-0.5f * (float)cnv_size.get_height() + m_view_toolbar.get_height()) * inv_zoom;
+    float top = (-0.5f * (float)cnv_size.get_height() + view_toolbar.get_height()) * inv_zoom;
     float left = -0.5f * (float)cnv_size.get_width() * inv_zoom;
-    m_view_toolbar.set_position(top, left);
-    m_view_toolbar.render(*this);
+    view_toolbar.set_position(top, left);
+    view_toolbar.render(*this);
 }
 
 #if ENABLE_SHOW_CAMERA_TARGET
@@ -5620,10 +5912,10 @@ Vec3d GLCanvas3D::_mouse_to_3d(const Point& mouse_pos, float* z)
     if (m_canvas == nullptr)
         return Vec3d(DBL_MAX, DBL_MAX, DBL_MAX);
 
-
-    const std::array<int, 4>& viewport = m_camera.get_viewport();
-    const Transform3d& modelview_matrix = m_camera.get_view_matrix();
-    const Transform3d& projection_matrix = m_camera.get_projection_matrix();
+    const Camera& camera = wxGetApp().plater()->get_camera();
+    const std::array<int, 4>& viewport = camera.get_viewport();
+    const Transform3d& modelview_matrix = camera.get_view_matrix();
+    const Transform3d& projection_matrix = camera.get_projection_matrix();
 
     GLint y = viewport[3] - (GLint)mouse_pos(1);
     GLfloat mouse_z;
@@ -6194,7 +6486,7 @@ void GLCanvas3D::_load_gcode_extrusion_paths(const GCodePreviewData& preview_dat
             case GCodePreviewData::Extrusion::FanSpeed:
                 return path.fan_speed;
             case GCodePreviewData::Extrusion::VolumetricRate:
-                return path.feedrate * (float)path.mm3_per_mm;
+                return path.feedrate * path.mm3_per_mm;
             case GCodePreviewData::Extrusion::Tool:
                 return (float)path.extruder_id;
             case GCodePreviewData::Extrusion::ColorPrint:
@@ -6811,6 +7103,39 @@ bool GLCanvas3D::_deactivate_undo_redo_toolbar_items()
     else if (m_undoredo_toolbar.is_item_pressed("redo"))
     {
         m_undoredo_toolbar.force_right_action(m_undoredo_toolbar.get_item_id("redo"), *this);
+        return true;
+    }
+
+    return false;
+}
+
+bool GLCanvas3D::_deactivate_search_toolbar_item()
+{
+    if (m_main_toolbar.is_item_pressed("search"))
+    {
+        m_main_toolbar.force_left_action(m_main_toolbar.get_item_id("search"), *this);
+        return true;
+    }
+
+    return false;
+}
+
+bool GLCanvas3D::_activate_search_toolbar_item()
+{
+    if (!m_main_toolbar.is_item_pressed("search"))
+    {
+        m_main_toolbar.force_left_action(m_main_toolbar.get_item_id("search"), *this);
+        return true;
+    }
+
+    return false;
+}
+
+bool GLCanvas3D::_deactivate_collapse_toolbar_items()
+{
+    if (m_collapse_toolbar.is_item_pressed("print"))
+    {
+        m_collapse_toolbar.force_left_action(m_collapse_toolbar.get_item_id("print"), *this);
         return true;
     }
 
