@@ -97,7 +97,7 @@ bool GCodeAnalyzer::Metadata::operator != (const GCodeAnalyzer::Metadata& other)
     return false;
 }
 
-GCodeAnalyzer::GCodeMove::GCodeMove(GCodeMove::EType type, ExtrusionRole extrusion_role, unsigned int extruder_id, float mm3_per_mm, float width, float height, float feedrate, const Vec3d& start_position, const Vec3d& end_position, float delta_extruder, float fan_speed, float layer_time, unsigned int cp_color_id/* = 0*/)
+GCodeAnalyzer::GCodeMove::GCodeMove(GCodeMove::EType type, ExtrusionRole extrusion_role, unsigned int extruder_id, float mm3_per_mm, float width, float height, float feedrate, const Vec3f& start_position, const Vec3f& end_position, float delta_extruder, float fan_speed, float layer_time, unsigned int cp_color_id/* = 0*/)
     : type(type)
     , data(extrusion_role, extruder_id, mm3_per_mm, width, height, feedrate, fan_speed, layer_time, cp_color_id)
     , start_position(start_position)
@@ -937,8 +937,8 @@ void GCodeAnalyzer::_store_move(GCodeAnalyzer::GCodeMove::EType type)
     if (extr_it != m_extruder_offsets.end())
         extruder_offset = Vec3f((float)extr_it->second(0), (float)extr_it->second(1), 0.0f);
 
-    Vec3d start_position = _get_start_position() + extruder_offset;
-    Vec3d end_position = _get_end_position() + extruder_offset;
+    Vec3f start_position = _get_start_position() + extruder_offset;
+    Vec3f end_position = _get_end_position() + extruder_offset;
     it->second.emplace_back(type, _get_extrusion_role(), extruder_id, _get_mm3_per_mm(), _get_width(), _get_height(), _get_feedrate(), start_position, end_position, _get_delta_extrusion(), _get_fan_speed(), _get_layer_time(), _get_cp_color_id());
 }
 
@@ -1008,7 +1008,6 @@ void GCodeAnalyzer::_calc_gcode_preview_extrusion_layers(GCodePreviewData& previ
     unsigned int cancel_callback_threshold = (unsigned int)std::max((int)extrude_moves->second.size() / 25, 1);
     unsigned int cancel_callback_curr = 0;
 
-    time_estimator.calculate_layer_time();
     for (GCodeMove& move : extrude_moves->second)
     {
         z = (float)move.start_position.z();

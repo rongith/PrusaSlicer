@@ -87,8 +87,8 @@ public:
         Vec3f end_position;
         float delta_extruder;
 
-        GCodeMove(EType type, ExtrusionRole extrusion_role, unsigned int extruder_id, float mm3_per_mm, float width, float height, float feedrate, const Vec3d& start_position, const Vec3d& end_position, float delta_extruder, float fan_speed, float layer_time, unsigned int cp_color_id = 0);
-        GCodeMove(EType type, const Metadata& data, const Vec3d& start_position, const Vec3d& end_position, float delta_extruder);
+        GCodeMove(EType type, ExtrusionRole extrusion_role, unsigned int extruder_id, float mm3_per_mm, float width, float height, float feedrate, const Vec3f& start_position, const Vec3f& end_position, float delta_extruder, float fan_speed, float layer_time, unsigned int cp_color_id = 0);
+        GCodeMove(EType type, const Metadata& data, const Vec3f& start_position, const Vec3f& end_position, float delta_extruder);
     };
 
     typedef std::vector<GCodeMove> GCodeMovesList;
