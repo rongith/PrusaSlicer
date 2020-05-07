@@ -283,22 +283,20 @@ GUI_App::~GUI_App()
         delete preset_updater;
 }
 
-#if ENABLE_NON_STATIC_CANVAS_MANAGER
 std::string GUI_App::get_gl_info(bool format_as_html, bool extensions)
 {
-    return GLCanvas3DManager::get_gl_info().to_string(format_as_html, extensions);
+    return OpenGLManager::get_gl_info().to_string(format_as_html, extensions);
 }
 
 wxGLContext* GUI_App::init_glcontext(wxGLCanvas& canvas)
 {
-    return m_canvas_mgr.init_glcontext(canvas);
+    return m_opengl_mgr.init_glcontext(canvas);
 }
 
 bool GUI_App::init_opengl()
 {
-    return m_canvas_mgr.init_gl();
+    return m_opengl_mgr.init_gl();
 }
-#endif // ENABLE_NON_STATIC_CANVAS_MANAGER
 
 void GUI_App::init_app_config()
 {
@@ -324,6 +322,7 @@ void GUI_App::init_app_config()
 		app_config->load();
 	}
 }
+
 bool GUI_App::OnInit()
 {
     try {
@@ -413,7 +412,8 @@ bool GUI_App::on_init_inner()
     if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr)
         wxImage::AddHandler(new wxPNGHandler());
     mainframe = new MainFrame();
-    mainframe->switch_to(true); // hide settings tabs after first Layout
+    // hide settings tabs after first Layout
+    mainframe->select_tab(0);
 
     sidebar().obj_list()->init_objects(); // propagate model objects to object list
 //     update_mode(); // !!! do that later
@@ -602,6 +602,8 @@ void GUI_App::recreate_GUI()
 
     MainFrame *old_main_frame = mainframe;
     mainframe = new MainFrame();
+    // hide settings tabs after first Layout
+    mainframe->select_tab(0);
     // Propagate model objects to object list.
     sidebar().obj_list()->init_objects();
     SetTopWindow(mainframe);
