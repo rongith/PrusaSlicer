@@ -806,11 +806,10 @@ namespace Slic3r {
             block_time += block.cruise_time();
             block_time += block.deceleration_time();
             m_time += block_time;
-            block.elapsed_time = m_time;
-            block.time = block_time;
             if (block.g1_line_id >= 0)
 	            m_g1_times.emplace_back(block.g1_line_id, m_time);
-            add_block_to_layer_time(block);
+            if (block.no_delta_Z)
+                add_block_to_layer_time(block.z, block_time);
 
 #if ENABLE_MOVE_STATS
             MovesStatsMap::iterator it = _moves_stats.find(block.move_type);
@@ -1664,23 +1663,20 @@ namespace Slic3r {
         m_layers.clear();
     }
 
-    void GCodeTimeEstimator::add_block_to_layer_time(Block& block)
+    void GCodeTimeEstimator::add_block_to_layer_time(float z, float time)
     {
-        if (block.no_delta_Z)
+        int j = 0;
+        bool layer_found = false;
+        while (j < (int)m_layers.size())
         {
-            int j = 0;
-            bool layer_found = false;
-            while (j < (int)m_layers.size())
-            {
-                if (block.z == m_layers[j].z) {
-                    m_layers[j].time += block.time;
-                    layer_found = true;
-                }
-                j++;
+            if (m_layers[j].z == z) {
+                m_layers[j].time += time;
+                layer_found = true;
             }
-            if (!layer_found) {
-                m_layers.push_back({ block.z, block.time });
-            }
+            j++;
+        }
+        if (!layer_found) {
+            m_layers.push_back({ z, time });
         }
     }
 

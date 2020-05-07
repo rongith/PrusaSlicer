@@ -160,8 +160,6 @@ namespace Slic3r {
 
             FeedrateProfile feedrate;
             Trapezoid trapezoid;
-            float elapsed_time;
-            float time;
 
             // Ordnary index of this G1 line in the file.
             int   g1_line_id { -1 };
@@ -353,14 +351,9 @@ namespace Slic3r {
         unsigned int get_extruder_id() const;
         void reset_extruder_id();
 
-        void add_additional_time(float timeSec);
-        void set_additional_time(float timeSec);
-        float get_additional_time() const;
-
-        //void calculate_layer_time();
         float get_layer_time(float z);
         void reset_layers();
-        void add_block_to_layer_time(Block& block);
+        void add_block_to_layer_time(float z, float time);
 
         void set_default();
 
