@@ -262,13 +262,14 @@ bool OptionsSearcher::search(const std::string& search, bool force/* = false*/)
         	append(matches, matches2);
         	score = score2;
         }
-        if (fuzzy_match(wsearch, label_english, score2, matches2) && score2 > score) {
+        if (view_params.english && fuzzy_match(wsearch, label_english, score2, matches2) && score2 > score) {
         	label   = std::move(label_english);
         	matches = std::move(matches2);
         	score   = score2;
         }
         if (score > std::numeric_limits<int>::min()) {
-		    label = mark_string(label, matches);
+		    label = mark_string(label, matches);            
+            label += L"  [" + std::to_wstring(score) + L"]";// add score value
 	        std::string label_u8 = into_u8(label);
 	        std::string label_plain = label_u8;
 	        boost::erase_all(label_plain, std::string(1, char(ImGui::ColorMarkerStart)));
@@ -434,13 +435,15 @@ SearchDialog::SearchDialog(OptionsSearcher* searcher)
 
     check_category  = new wxCheckBox(this, wxID_ANY, _L("Category"));
     check_group     = new wxCheckBox(this, wxID_ANY, _L("Group"));
-    check_english   = new wxCheckBox(this, wxID_ANY, _L("Search in English"));
+    if (GUI::wxGetApp().is_localized())
+        check_english   = new wxCheckBox(this, wxID_ANY, _L("Search in English"));
 
     wxStdDialogButtonSizer* cancel_btn = this->CreateStdDialogButtonSizer(wxCANCEL);
 
     check_sizer->Add(check_category, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
-    check_sizer->Add(check_group,    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
-    check_sizer->Add(check_english,  0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
+    check_sizer->Add(check_group,    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border); 
+    if (GUI::wxGetApp().is_localized())
+        check_sizer->Add(check_english,  0, wxALIGN_CENTER_VERTICAL | wxRIGHT, border);
     check_sizer->AddStretchSpacer(border);
     check_sizer->Add(cancel_btn,     0, wxALIGN_CENTER_VERTICAL);
 
@@ -459,7 +462,8 @@ SearchDialog::SearchDialog(OptionsSearcher* searcher)
     search_list->Bind(wxEVT_LEFT_UP, &SearchDialog::OnMouseClick, this);
     search_list->Bind(wxEVT_KEY_DOWN,&SearchDialog::OnKeyDown, this);
 
-    check_english ->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
+    if (GUI::wxGetApp().is_localized())
+        check_english ->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
     check_category->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
     check_group   ->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
 

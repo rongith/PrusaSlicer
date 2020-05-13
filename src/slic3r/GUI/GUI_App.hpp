@@ -135,8 +135,9 @@ public:
     const wxFont&   normal_font()           { return m_normal_font; }
     int             em_unit() const         { return m_em_unit; }
     float           toolbar_icon_scale(const bool is_limited = false) const;
+    void            set_auto_toolbar_icon_scale(float scale) const;
 
-    void            recreate_GUI();
+    void            recreate_GUI(const wxString& message);
     void            system_info();
     void            keyboard_shortcuts();
     void            load_project(wxWindow *parent, wxString& input_file) const;
@@ -162,6 +163,7 @@ public:
     wxString        current_language_code() const { return m_wxLocale->GetCanonicalName(); }
 	// Translate the language code to a code, for which Prusa Research maintains translations. Defaults to "en_US".
     wxString 		current_language_code_safe() const;
+    bool            is_localized() const { return m_wxLocale->GetLocale() != "English"; }
 
     virtual bool OnExceptionInMainLoop() override;
 

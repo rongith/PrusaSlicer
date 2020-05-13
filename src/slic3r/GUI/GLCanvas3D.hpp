@@ -409,6 +409,7 @@ private:
     class Slope
     {
         bool m_enabled{ false };
+        bool m_dialog_shown{ false };
         GLCanvas3D& m_canvas;
         GLVolumeCollection& m_volumes;
 
@@ -417,9 +418,14 @@ private:
 
         void enable(bool enable) { m_enabled = enable; }
         bool is_enabled() const { return m_enabled; }
-        void show(bool show) { m_volumes.set_slope_active(m_enabled ? show : false); }
-        bool is_shown() const { return m_volumes.is_slope_active(); }
+        void use(bool use) { m_volumes.set_slope_active(m_enabled ? use : false); }
+        bool is_used() const { return m_volumes.is_slope_active(); }
+        void show_dialog(bool show) { if (show && is_used()) return; use(show); m_dialog_shown = show; }
+        bool is_dialog_shown() const { return m_dialog_shown; }
         void render() const;
+        void set_range(const std::array<float, 2>& range) const {
+            m_volumes.set_slope_z_range({ -::cos(Geometry::deg2rad(90.0f - range[0])), -::cos(Geometry::deg2rad(90.0f - range[1])) });
+        }
     };
 #endif // ENABLE_SLOPE_RENDERING
 
@@ -502,6 +508,7 @@ private:
     Labels m_labels;
 #if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
     mutable Tooltip m_tooltip;
+    mutable bool m_tooltip_enabled{ true };
 #endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 #if ENABLE_SLOPE_RENDERING
     Slope m_slope;
@@ -567,6 +574,7 @@ public:
 
     bool is_layers_editing_enabled() const;
     bool is_layers_editing_allowed() const;
+    bool is_search_pressed() const;
 
     void reset_layer_height_profile();
     void adaptive_layer_height_profile(float quality_factor);
@@ -633,6 +641,9 @@ public:
     void on_timer(wxTimerEvent& evt);
     void on_mouse(wxMouseEvent& evt);
     void on_paint(wxPaintEvent& evt);
+#if ENABLE_CANVAS_TOOLTIP_USING_IMGUI
+    void on_set_focus(wxFocusEvent& evt);
+#endif // ENABLE_CANVAS_TOOLTIP_USING_IMGUI
 
     Size get_canvas_size() const;
     Vec2d get_local_mouse_position() const;
@@ -709,8 +720,10 @@ public:
     void show_labels(bool show) { m_labels.show(show); }
 
 #if ENABLE_SLOPE_RENDERING
-    bool is_slope_shown() const { return m_slope.is_shown(); }
-    void show_slope(bool show) { m_slope.show(show); }
+    bool is_slope_shown() const { return m_slope.is_dialog_shown(); }
+    void use_slope(bool use) { m_slope.use(use); }
+    void show_slope(bool show) { m_slope.show_dialog(show); }
+    void set_slope_range(const std::array<float, 2>& range) { m_slope.set_range(range); }
 #endif // ENABLE_SLOPE_RENDERING
 
 private:
@@ -741,6 +754,7 @@ private:
 #if ENABLE_RENDER_SELECTION_CENTER
     void _render_selection_center() const;
 #endif // ENABLE_RENDER_SELECTION_CENTER
+    void _check_and_update_toolbar_icon_scale() const;
     void _render_overlays() const;
     void _render_warning_texture() const;
     void _render_legend_texture() const;

@@ -7,7 +7,7 @@
 #include <wx/menu.h>
 #include <wx/progdlg.h>
 #include <wx/tooltip.h>
-#include <wx/glcanvas.h>
+//#include <wx/glcanvas.h>
 #include <wx/debug.h>
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -28,6 +28,7 @@
 #include "RemovableDriveManager.hpp"
 #include "InstanceCheck.hpp"
 #include "I18N.hpp"
+#include "GLCanvas3D.hpp"
 
 #include <fstream>
 #include "GUI_App.hpp"
@@ -476,6 +477,11 @@ bool MainFrame::can_slice() const
 
 bool MainFrame::can_change_view() const
 {
+    if (m_layout == slNew)
+        return m_plater->IsShown();
+    if (m_layout == slDlg)
+        return true;
+    // slOld layout mode
     int page_id = m_tabpanel->GetSelection();
     return page_id != wxNOT_FOUND && dynamic_cast<const Slic3r::GUI::Plater*>(m_tabpanel->GetPage((size_t)page_id)) != nullptr;
 }
@@ -1258,17 +1264,28 @@ void MainFrame::select_tab(size_t tab/* = size_t(-1)*/)
         if (tab==0) {
             if (m_settings_dialog->IsShown())
                 this->SetFocus();
+            // plater should be focused for correct navigation inside search window
+            if (m_plater->canvas3D()->is_search_pressed())
+                m_plater->SetFocus();
             return;
         }
         // Show/Activate Settings Dialog
         if (m_settings_dialog->IsShown())
+#ifdef __WXOSX__ // Don't call SetFont under OSX to avoid name cutting in ObjectList
+            m_settings_dialog->Hide();
+#else
             m_settings_dialog->SetFocus();
         else
-            m_settings_dialog->Show();
+#endif
+        m_settings_dialog->Show();
     }
     else if (m_layout == slNew) {
         m_plater->Show(tab == 0);
         m_tabpanel->Show(tab != 0);
+
+        // plater should be focused for correct navigation inside search window
+        if (tab == 0 && m_plater->canvas3D()->is_search_pressed())
+            m_plater->SetFocus();
         Layout();
     }
 
