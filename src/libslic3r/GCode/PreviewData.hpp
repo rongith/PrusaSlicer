@@ -193,6 +193,8 @@ public:
 
     struct Ranges
     {
+        // Color mapping by mm3_per_mm.
+        Range mm3_per_mm;
         // Color mapping by layer height.
         Range height;
         // Color mapping by extrusion width.
@@ -222,6 +224,7 @@ public:
         enum EViewType : unsigned char
         {
             FeatureType,
+            Mm3_per_mm,
             Height,
             Width,
             Feedrate,
@@ -380,6 +383,7 @@ public:
     bool empty() const;
 
     Color get_extrusion_role_color(ExtrusionRole role) const;
+    Color get_mm3_per_mm_color(float rate) const;
     Color get_height_color(float height) const;
     Color get_width_color(float width) const;
     Color get_feedrate_color(float feedrate) const;

@@ -231,6 +231,7 @@ bool Preview::init(wxWindow* parent, Model* model)
 
     m_choice_view_type = new wxChoice(this, wxID_ANY);
     m_choice_view_type->Append(_(L("Feature type")));
+    m_choice_view_type->Append(_(L("Section")));
     m_choice_view_type->Append(_(L("Height")));
     m_choice_view_type->Append(_(L("Width")));
     m_choice_view_type->Append(_(L("Speed")));

@@ -997,6 +997,7 @@ void GCodeAnalyzer::_calc_gcode_preview_extrusion_layers(GCodePreviewData& previ
     Polyline polyline;
     Vec3f position(FLT_MAX, FLT_MAX, FLT_MAX);
     float volumetric_rate = FLT_MAX;
+    GCodePreviewData::Range mm3_per_mm_range;
     GCodePreviewData::Range height_range;
     GCodePreviewData::Range width_range;
     GCodePreviewData::MultiRange<GCodePreviewData::FeedrateKind> feedrate_range;
@@ -1041,6 +1042,7 @@ void GCodeAnalyzer::_calc_gcode_preview_extrusion_layers(GCodePreviewData& previ
             data = move.data;
             z = (float)move.start_position.z();
             volumetric_rate = move.data.feedrate * move.data.mm3_per_mm;
+            mm3_per_mm_range.update_from(move.data.mm3_per_mm);
             height_range.update_from(move.data.height);
             width_range.update_from(move.data.width);
             feedrate_range.update_from(move.data.feedrate, GCodePreviewData::FeedrateKind::EXTRUSION);
@@ -1061,6 +1063,7 @@ void GCodeAnalyzer::_calc_gcode_preview_extrusion_layers(GCodePreviewData& previ
     Helper::store_polyline(polyline, data, z, preview_data);
 
     // updates preview ranges data
+    preview_data.ranges.mm3_per_mm.update_from(mm3_per_mm_range);
     preview_data.ranges.height.update_from(height_range);
     preview_data.ranges.width.update_from(width_range);
     preview_data.ranges.feedrate.update_from(feedrate_range);
