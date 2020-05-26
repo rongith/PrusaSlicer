@@ -446,7 +446,7 @@ void GCodeAnalyzer::_processG92(const GCodeReader::GCodeLine& line)
 
     if (!anyFound && ! line.has_unknown_axis())
     {
-    	// The G92 may be called for axes that PrusaSlicer does not recognize, for example see GH issue #3510, 
+    	// The G92 may be called for axes that PrusaSlicer does not recognize, for example see GH issue #3510,
     	// where G92 A0 B0 is called although the extruder axis is till E.
         for (unsigned char a = X; a < Num_Axis; ++a)
         {
@@ -978,12 +978,13 @@ void GCodeAnalyzer::_calc_gcode_preview_extrusion_layers(GCodePreviewData& previ
     Polyline polyline;
     Vec3f position(FLT_MAX, FLT_MAX, FLT_MAX);
     float volumetric_rate = FLT_MAX;
+    GCodePreviewData::Range mm3_per_mm_range;
     GCodePreviewData::Range height_range;
     GCodePreviewData::Range width_range;
     GCodePreviewData::MultiRange<GCodePreviewData::FeedrateKind> feedrate_range;
     GCodePreviewData::Range volumetric_rate_range;
     GCodePreviewData::Range fan_speed_range;
-
+ 
     // to avoid to call the callback too often
     unsigned int cancel_callback_threshold = (unsigned int)std::max((int)extrude_moves->second.size() / 25, 1);
     unsigned int cancel_callback_curr = 0;
@@ -1013,6 +1014,7 @@ void GCodeAnalyzer::_calc_gcode_preview_extrusion_layers(GCodePreviewData& previ
             data = move.data;
             z = (float)move.start_position.z();
             volumetric_rate = move.data.feedrate * move.data.mm3_per_mm;
+            mm3_per_mm_range.update_from(move.data.mm3_per_mm);
             height_range.update_from(move.data.height);
             width_range.update_from(move.data.width);
             feedrate_range.update_from(move.data.feedrate, GCodePreviewData::FeedrateKind::EXTRUSION);
@@ -1032,6 +1034,7 @@ void GCodeAnalyzer::_calc_gcode_preview_extrusion_layers(GCodePreviewData& previ
     Helper::store_polyline(polyline, data, z, preview_data);
 
     // updates preview ranges data
+    preview_data.ranges.mm3_per_mm.update_from(mm3_per_mm_range);
     preview_data.ranges.height.update_from(height_range);
     preview_data.ranges.width.update_from(width_range);
     preview_data.ranges.feedrate.update_from(feedrate_range);
@@ -1046,7 +1049,7 @@ void GCodeAnalyzer::_calc_gcode_preview_travel(GCodePreviewData& preview_data, s
 {
     struct Helper
     {
-        static void store_polyline(const Polyline3& polyline, GCodePreviewData::Travel::EType type, GCodePreviewData::Travel::Polyline::EDirection direction, 
+        static void store_polyline(const Polyline3& polyline, GCodePreviewData::Travel::EType type, GCodePreviewData::Travel::Polyline::EDirection direction,
             float feedrate, unsigned int extruder_id, GCodePreviewData& preview_data)
         {
             // if the polyline is valid, store it

@@ -240,6 +240,7 @@ void GCodePreviewData::set_default()
 
 void GCodePreviewData::reset()
 {
+    ranges.mm3_per_mm.reset();
     ranges.width.reset();
     ranges.height.reset();
     ranges.feedrate.reset();
@@ -259,6 +260,11 @@ bool GCodePreviewData::empty() const
 Color GCodePreviewData::get_extrusion_role_color(ExtrusionRole role) const
 {
     return extrusion.role_colors[role];
+}
+
+Color GCodePreviewData::get_mm3_per_mm_color(float mm3_per_mm) const
+{
+    return ranges.mm3_per_mm.get_color_at(mm3_per_mm);
 }
 
 Color GCodePreviewData::get_height_color(float height) const
@@ -346,6 +352,8 @@ std::string GCodePreviewData::get_legend_title() const
     {
     case Extrusion::FeatureType:
         return L("Feature type");
+    case Extrusion::Mm3_per_mm:
+        return L("Section (mm²)");
     case Extrusion::Height:
         return L("Height (mm)");
     case Extrusion::Width:
@@ -410,6 +418,11 @@ GCodePreviewData::LegendItemsList GCodePreviewData::get_legend_items(const std::
                 items.emplace_back(Slic3r::I18N::translate(extrusion.role_names[i]), extrusion.role_colors[i]);
             }
 
+            break;
+        }
+    case Extrusion::Mm3_per_mm:
+        {
+            Helper::FillListFromRange(items, ranges.mm3_per_mm, 4, 1.0f);
             break;
         }
     case Extrusion::Height:

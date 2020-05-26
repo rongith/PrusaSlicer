@@ -6480,6 +6480,8 @@ void GLCanvas3D::_load_gcode_extrusion_paths(const GCodePreviewData& preview_dat
             case GCodePreviewData::Extrusion::FeatureType:
             	// The role here is used for coloring.
                 return (float)path.extrusion_role;
+            case GCodePreviewData::Extrusion::Mm3_per_mm:
+                return path.mm3_per_mm;
             case GCodePreviewData::Extrusion::Height:
                 return path.height;
             case GCodePreviewData::Extrusion::Width:
@@ -6507,6 +6509,8 @@ void GLCanvas3D::_load_gcode_extrusion_paths(const GCodePreviewData& preview_dat
             {
             case GCodePreviewData::Extrusion::FeatureType:
                 return data.get_extrusion_role_color((ExtrusionRole)(int)value);
+            case GCodePreviewData::Extrusion::Mm3_per_mm:
+                return data.get_mm3_per_mm_color(value);
             case GCodePreviewData::Extrusion::Height:
                 return data.get_height_color(value);
             case GCodePreviewData::Extrusion::Width:
