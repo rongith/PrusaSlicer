@@ -166,7 +166,7 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxDEFAULT_FRAME_S
 																						// contain the notifications. This array should 
 																						// always be set to one when calling SHChnageNotifyRegister
 																						// or SHChangeNotifyDeregister will not work properly.
-			assert(m_ulSHChangeNotifyRegister != 0);    // Shell notification failed
+//			assert(m_ulSHChangeNotifyRegister != 0);    // Shell notification failed
 		} else {
 			// Failed to get desktop location
 			assert(false); 
