@@ -102,7 +102,11 @@ void PreferencesDialog::build()
 
 	def.label = L("Single Instance");
 	def.type = coBool;
-	def.tooltip = L("If this is enabled, when staring PrusaSlicer and another instance is running, that instance will be reactivated instead.");
+#if __APPLE__
+	def.tooltip = L("On OSX there is always only one instance of app running by default. However it is allowed to run multiple instances of same app from the command line. In such case this settings will allow only one instance.");
+#else
+	def.tooltip = L("If this is enabled, when staring PrusaSlicer and another instance of same PrusaSlicer is running, that instance will be reactivated instead.");
+#endif
 	def.set_default_value(new ConfigOptionBool{ app_config->has("single_instance") ? app_config->get("single_instance") == "1" : false });
 	option = Option(def, "single_instance");
 	m_optgroup_general->append_single_option_line(option);
@@ -116,7 +120,16 @@ void PreferencesDialog::build()
 	option = Option (def, "use_retina_opengl");
 	m_optgroup_general->append_single_option_line(option);
 #endif
-
+/*  // ysFIXME THis part is temporary commented
+    // The using of inches is implemented just for object's size and position
+    
+	def.label = L("Use inches instead of millimeters");
+	def.type = coBool;
+	def.tooltip = L("Use inches instead of millimeters for the object's size");
+	def.set_default_value(new ConfigOptionBool{ app_config->get("use_inches") == "1" });
+	option = Option(def, "use_inches");
+	m_optgroup_general->append_single_option_line(option);
+*/
 	m_optgroup_camera = std::make_shared<ConfigOptionsGroup>(this, _(L("Camera")));
 	m_optgroup_camera->label_width = 40;
 	m_optgroup_camera->m_on_change = [this](t_config_option_key opt_key, boost::any value) {

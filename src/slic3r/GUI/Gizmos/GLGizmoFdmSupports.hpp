@@ -33,21 +33,22 @@ private:
     // individual facets (one of the enum values above).
     std::vector<std::vector<FacetSupportType>> m_selected_facets;
 
-    // Store two vertex buffer arrays (for enforcers/blockers)
-    // for each model-part volume.
-    std::vector<std::array<GLIndexedVertexArray, 2>> m_ivas;
+    // Vertex buffer arrays for each model-part volume. There is a vector of
+    // arrays so that adding triangles can be done without regenerating all
+    // other triangles. Enforcers and blockers are of course separate.
+    std::vector<std::array<std::vector<GLIndexedVertexArray>, 2>> m_ivas;
 
-    void update_vertex_buffers(const ModelVolume* mv,
+    void update_vertex_buffers(const TriangleMesh* mesh,
                                int mesh_id,
-                               bool update_enforcers,
-                               bool update_blockers);
+                               FacetSupportType type, // enforcers / blockers
+                               const std::vector<size_t>* new_facets = nullptr); // nullptr -> regenerate all
+
 
 public:
     GLGizmoFdmSupports(GLCanvas3D& parent, const std::string& icon_filename, unsigned int sprite_id);
     ~GLGizmoFdmSupports() override;
     void set_fdm_support_data(ModelObject* model_object, const Selection& selection);
     bool gizmo_event(SLAGizmoEventType action, const Vec2d& mouse_position, bool shift_down, bool alt_down, bool control_down);
-    using NeighborData = std::pair<size_t, size_t>;
 
 
 private:
@@ -83,8 +84,6 @@ private:
 
     Button m_button_down = Button::None;
     EState m_old_state = Off; // to be able to see that the gizmo has just been closed (see on_set_state)
-
-    std::vector<std::vector<NeighborData>> m_neighbors; // pairs of vertex_index - facet_index for each mesh
 
 protected:
     void on_set_state() override;

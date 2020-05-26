@@ -323,6 +323,12 @@ void GUI_App::init_app_config()
 	}
 }
 
+void GUI_App::init_single_instance_checker(const std::string &name, const std::string &path)
+{
+    BOOST_LOG_TRIVIAL(debug) << "init wx instance checker " << name << " "<< path; 
+    m_single_instance_checker = std::make_unique<wxSingleInstanceChecker>(boost::nowide::widen(name), boost::nowide::widen(path));
+}
+
 bool GUI_App::OnInit()
 {
     try {
@@ -451,6 +457,10 @@ bool GUI_App::on_init_inner()
 				preset_updater->slic3r_update_notify();
 				preset_updater->sync(preset_bundle);
 				});
+#ifdef _WIN32
+			//sets window property to mainframe so other instances can indentify it
+			OtherInstanceMessageHandler::init_windows_properties(mainframe, m_instance_hash_int);
+#endif //WIN32
         }
     });
 
@@ -570,6 +580,11 @@ void GUI_App::set_label_clr_sys(const wxColour& clr) {
     app_config->save();
 }
 
+wxSize GUI_App::get_min_size() const
+{
+    return wxSize(76*m_em_unit, 49 * m_em_unit);
+}
+
 float GUI_App::toolbar_icon_scale(const bool is_limited/* = false*/) const
 {
 #ifdef __APPLE__
@@ -603,7 +618,7 @@ void GUI_App::set_auto_toolbar_icon_scale(float scale) const
     const float icon_sc = m_em_unit * 0.1f;
 #endif // __APPLE__
 
-    int int_val = std::min(int(scale / icon_sc * 100), 100);
+    long int_val = std::min(int(std::lround(scale / icon_sc * 100)), 100);
     std::string val = std::to_string(int_val);
 
     app_config->set("auto_toolbar_size", val);

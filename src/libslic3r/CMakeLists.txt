@@ -232,6 +232,7 @@ add_library(libslic3r STATIC
     SLA/Contour3D.cpp
     SLA/EigenMesh3D.hpp
     SLA/Clustering.hpp
+    SLA/ReprojectPointsOnMesh.hpp
 )
 
 if (SLIC3R_STATIC)
@@ -303,7 +304,7 @@ if(WIN32)
 endif()
 
 if(SLIC3R_PROFILE)
-    target_link_libraries(slic3r Shiny)
+    target_link_libraries(libslic3r Shiny)
 endif()
 
 if (SLIC3R_PCH AND NOT SLIC3R_SYNTAXONLY)

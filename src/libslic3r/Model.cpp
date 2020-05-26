@@ -448,6 +448,31 @@ void Model::convert_multipart_object(unsigned int max_extruders)
     this->objects.push_back(object);
 }
 
+bool Model::looks_like_imperial_units() const
+{
+    if (this->objects.size() == 0)
+        return false;
+
+    stl_vertex size = this->objects[0]->get_object_stl_stats().size;
+
+    for (ModelObject* o : this->objects) {
+        auto sz = o->get_object_stl_stats().size;
+
+        if (size[0] < sz[0]) size[0] = sz[0];
+        if (size[1] < sz[1]) size[1] = sz[1];
+        if (size[2] < sz[2]) size[2] = sz[2];
+    }
+
+    return (size[0] < 3 && size[1] < 3 && size[2] < 3);
+}
+
+void Model::convert_from_imperial_units()
+{
+    double in_to_mm = 25.4;
+    for (ModelObject* o : this->objects)
+        o->scale_mesh_after_creation(Vec3d(in_to_mm, in_to_mm, in_to_mm));
+}
+
 void Model::adjust_min_z()
 {
     if (objects.empty())
@@ -964,6 +989,56 @@ void ModelObject::scale_mesh_after_creation(const Vec3d &versor)
         v->set_offset(versor.cwiseProduct(v->get_offset()));
     }
     this->invalidate_bounding_box();
+}
+
+void ModelObject::convert_units(ModelObjectPtrs& new_objects, bool from_imperial, std::vector<int> volume_idxs)
+{
+    BOOST_LOG_TRIVIAL(trace) << "ModelObject::convert_units - start";
+
+    ModelObject* new_object = new_clone(*this);
+
+    double koef = from_imperial ? 25.4 : 0.0393700787;
+    const Vec3d versor = Vec3d(koef, koef, koef);
+
+    new_object->set_model(nullptr);
+    new_object->sla_support_points.clear();
+    new_object->sla_drain_holes.clear();
+    new_object->sla_points_status = sla::PointsStatus::NoPoints;
+    new_object->clear_volumes();
+    new_object->input_file.clear();
+
+    int vol_idx = 0;
+    for (ModelVolume* volume : volumes)
+    {
+        volume->m_supported_facets.clear();
+        if (!volume->mesh().empty()) {
+            TriangleMesh mesh(volume->mesh());
+            mesh.require_shared_vertices();
+
+            ModelVolume* vol = new_object->add_volume(mesh);
+            vol->name = volume->name;
+            // Don't copy the config's ID.
+            static_cast<DynamicPrintConfig&>(vol->config) = static_cast<const DynamicPrintConfig&>(volume->config);
+            assert(vol->config.id().valid());
+            assert(vol->config.id() != volume->config.id());
+            vol->set_material(volume->material_id(), *volume->material());
+
+            // Perform conversion
+            if (volume_idxs.empty() || 
+                std::find(volume_idxs.begin(), volume_idxs.end(), vol_idx) != volume_idxs.end()) {
+                vol->scale_geometry_after_creation(versor);
+                vol->set_offset(versor.cwiseProduct(vol->get_offset()));
+            }
+            else
+                vol->set_offset(volume->get_offset());
+        }
+        vol_idx ++;
+    }
+    new_object->invalidate_bounding_box();
+
+    new_objects.push_back(new_object);
+
+    BOOST_LOG_TRIVIAL(trace) << "ModelObject::convert_units - end";
 }
 
 size_t ModelObject::materials_count() const

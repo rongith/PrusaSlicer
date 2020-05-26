@@ -281,6 +281,7 @@ public:
 
     // This method could only be called before the meshes of this ModelVolumes are not shared!
     void scale_mesh_after_creation(const Vec3d& versor);
+    void convert_units(ModelObjectPtrs&new_objects, bool from_imperial, std::vector<int> volume_idxs);
 
     size_t materials_count() const;
     size_t facets_count() const;
@@ -851,6 +852,8 @@ public:
 
     bool 		  looks_like_multipart_object() const;
     void 		  convert_multipart_object(unsigned int max_extruders);
+    bool          looks_like_imperial_units() const;
+    void          convert_from_imperial_units();
 
     // Ensures that the min z of the model is not negative
     void 		  adjust_min_z();

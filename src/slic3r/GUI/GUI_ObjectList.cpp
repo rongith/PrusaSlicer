@@ -334,6 +334,34 @@ void ObjectList::get_selected_item_indexes(int& obj_idx, int& vol_idx, const wxD
     vol_idx =   type & itVolume ? m_objects_model->GetVolumeIdByItem(item) : -1;
 }
 
+void ObjectList::get_selection_indexes(std::vector<int>& obj_idxs, std::vector<int>& vol_idxs)
+{
+    wxDataViewItemArray sels;
+    GetSelections(sels);
+    assert(!sels.IsEmpty());
+
+    if (m_objects_model->GetItemType(sels[0]) & itVolume) {
+        for (wxDataViewItem item : sels) {
+            obj_idxs.emplace_back(m_objects_model->GetIdByItem(m_objects_model->GetTopParent(item)));
+
+            assert(m_objects_model->GetItemType(item) & itVolume);
+            vol_idxs.emplace_back(m_objects_model->GetVolumeIdByItem(item));
+        }
+    }
+    else {
+        for (wxDataViewItem item : sels) {
+            const ItemType type = m_objects_model->GetItemType(item);
+            assert(type & itObject | itInstance | itInstanceRoot);
+
+            obj_idxs.emplace_back(type & itObject ? m_objects_model->GetIdByItem(item) :
+                                  m_objects_model->GetIdByItem(m_objects_model->GetTopParent(item)));
+        }
+    }
+
+    std::sort(obj_idxs.begin(), obj_idxs.end(), std::greater<int>());
+    obj_idxs.erase(std::unique(obj_idxs.begin(), obj_idxs.end()), obj_idxs.end());
+}
+
 int ObjectList::get_mesh_errors_count(const int obj_idx, const int vol_idx /*= -1*/) const
 {
     if (obj_idx < 0)
@@ -1746,6 +1774,15 @@ void ObjectList::append_menu_item_scale_selection_to_fit_print_volume(wxMenu* me
         [](wxCommandEvent&) { wxGetApp().plater()->scale_selection_to_fit_print_volume(); }, "", menu);
 }
 
+void ObjectList::append_menu_items_convert_unit(wxMenu* menu)
+{
+    append_menu_item(menu, wxID_ANY, _L("Convert from imperial unit"), _L("Convert from imperial unit"),
+        [](wxCommandEvent&) { wxGetApp().plater()->convert_unit(true); }, "", menu);
+
+    append_menu_item(menu, wxID_ANY, _L("Convert to imperial unit"), _L("Convert to imperial unit"),
+        [](wxCommandEvent&) { wxGetApp().plater()->convert_unit(false); }, "", menu);
+}
+
 void ObjectList::create_object_popupmenu(wxMenu *menu)
 {
 #ifdef __WXOSX__  
@@ -1753,6 +1790,7 @@ void ObjectList::create_object_popupmenu(wxMenu *menu)
 #endif // __WXOSX__
 
     append_menu_item_reload_from_disk(menu);
+    append_menu_items_convert_unit(menu);
     append_menu_item_export_stl(menu);
     append_menu_item_fix_through_netfabb(menu);
     append_menu_item_scale_selection_to_fit_print_volume(menu);
@@ -1777,6 +1815,7 @@ void ObjectList::create_sla_object_popupmenu(wxMenu *menu)
 #endif // __WXOSX__
 
     append_menu_item_reload_from_disk(menu);
+    append_menu_items_convert_unit(menu);
     append_menu_item_export_stl(menu);
     append_menu_item_fix_through_netfabb(menu);
     // rest of a object_sla_menu will be added later in:
@@ -1790,6 +1829,7 @@ void ObjectList::create_part_popupmenu(wxMenu *menu)
 #endif // __WXOSX__
 
     append_menu_item_reload_from_disk(menu);
+    append_menu_items_convert_unit(menu);
     append_menu_item_export_stl(menu);
     append_menu_item_fix_through_netfabb(menu);
 
@@ -3991,6 +4031,26 @@ void ObjectList::msw_rescale()
     Layout();
 }
 
+void ObjectList::sys_color_changed()
+{
+    // msw_rescale_icons() updates icons, so use it
+    msw_rescale_icons();
+
+    // update existing items with bitmaps
+    m_objects_model->Rescale();
+
+    // msw_rescale_menu updates just icons, so use it
+    for (MenuWithSeparators* menu : { &m_menu_object, 
+                                      &m_menu_part, 
+                                      &m_menu_sla_object, 
+                                      &m_menu_instance, 
+                                      &m_menu_layer,
+                                      &m_menu_default})
+        msw_rescale_menu(menu);
+
+    Layout();
+}
+
 void ObjectList::ItemValueChanged(wxDataViewEvent &event)
 {
     if (event.GetColumn() == colName)
@@ -4051,6 +4111,8 @@ void ObjectList::show_multi_selection_menu()
         [this](wxCommandEvent&) { wxGetApp().plater()->reload_from_disk(); }, "", menu, []() {
         return wxGetApp().plater()->can_reload_from_disk();
     }, wxGetApp().plater());
+
+    append_menu_items_convert_unit(menu);
 
     wxGetApp().plater()->PopupMenu(menu);
 }
