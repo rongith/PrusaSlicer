@@ -119,8 +119,6 @@ public:
 
     static coord_t  _adjust_solid_spacing(const coord_t width, const coord_t distance);
 
-	static coord_t _adjust_bridging_spacing(const coord_t width, const coord_t distance);
-
     // Align a coordinate to a grid. The coordinate may be negative,
     // the aligned value will never be bigger than the original one.
     static coord_t _align_to_grid(const coord_t coord, const coord_t spacing) {
