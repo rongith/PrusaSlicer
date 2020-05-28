@@ -12,7 +12,6 @@
 #include <map>
 
 #include "GUI_Utils.hpp"
-#include "Plater.hpp"
 #include "Event.hpp"
 
 class wxNotebook;
@@ -27,6 +26,8 @@ namespace GUI
 
 class Tab;
 class PrintHostQueueDialog;
+class Plater;
+class MainFrame;
 
 enum QuickSlice
 {
@@ -121,6 +122,7 @@ class MainFrame : public DPIFrame
 
 protected:
     virtual void on_dpi_changed(const wxRect &suggested_rect);
+    virtual void on_sys_color_changed() override;
 
 public:
     MainFrame();

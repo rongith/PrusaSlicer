@@ -3,8 +3,7 @@
 
 #include <memory>
 #include <string>
-#include "libslic3r/PrintConfig.hpp"
-#include "MainFrame.hpp"
+#include "Preset.hpp"
 #include "ImGuiWrapper.hpp"
 #include "ConfigWizard.hpp"
 #include "OpenGLManager.hpp"
@@ -30,11 +29,21 @@ class PresetBundle;
 class PresetUpdater;
 class ModelObject;
 class PrintHostJobQueue;
-
+class Model;
 
 namespace GUI{
 class RemovableDriveManager;
 class OtherInstanceMessageHandler;
+class MainFrame;
+class Sidebar;
+class ObjectManipulation;
+class ObjectSettings;
+class ObjectList;
+class ObjectLayers;
+class Plater;
+
+
+
 enum FileType
 {
     FT_STL,
@@ -138,6 +147,7 @@ public:
     const wxFont&   bold_font()             { return m_bold_font; }
     const wxFont&   normal_font()           { return m_normal_font; }
     int             em_unit() const         { return m_em_unit; }
+    wxSize          get_min_size() const;
     float           toolbar_icon_scale(const bool is_limited = false) const;
     void            set_auto_toolbar_icon_scale(float scale) const;
 

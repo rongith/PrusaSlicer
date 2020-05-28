@@ -3,6 +3,7 @@
 #include "slic3r/GUI/GLCanvas3D.hpp"
 #include "slic3r/GUI/Camera.hpp"
 #include "slic3r/GUI/Gizmos/GLGizmosCommon.hpp"
+#include "slic3r/GUI/MainFrame.hpp"
 
 #include <GL/glew.h>
 
@@ -898,6 +899,7 @@ void GLGizmoSlaSupports::on_set_state()
         // Set default head diameter from config.
         const DynamicPrintConfig& cfg = wxGetApp().preset_bundle->sla_prints.get_edited_preset().config;
         m_new_point_head_diameter = static_cast<const ConfigOptionFloat*>(cfg.option("support_head_front_diameter"))->value;
+        m_c->instances_hider()->show_supports(true);
     }
     if (m_state == Off && m_old_state != Off) { // the gizmo was just turned Off
         bool will_ask = mo && m_editing_mode && unsaved_changes();

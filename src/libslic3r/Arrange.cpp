@@ -1,6 +1,7 @@
 #include "Arrange.hpp"
-//#include "Geometry.hpp"
 #include "SVG.hpp"
+
+#include "BoundingBox.hpp"
 
 #include <libnest2d/backends/clipper/geometries.hpp>
 #include <libnest2d/optimizers/nlopt/subplex.hpp>
@@ -51,8 +52,8 @@ template<class S> struct NfpImpl<S, NfpLevel::CONVEX_ONLY>
 namespace Slic3r {
 
 template<class Tout = double, class = FloatingOnly<Tout>, int...EigenArgs>
-inline SLIC3R_CONSTEXPR Eigen::Matrix<Tout, 2, EigenArgs...> unscaled(
-    const ClipperLib::IntPoint &v) SLIC3R_NOEXCEPT
+inline constexpr Eigen::Matrix<Tout, 2, EigenArgs...> unscaled(
+    const ClipperLib::IntPoint &v) noexcept
 {
     return Eigen::Matrix<Tout, 2, EigenArgs...>{unscaled<Tout>(v.X),
                                                 unscaled<Tout>(v.Y)};

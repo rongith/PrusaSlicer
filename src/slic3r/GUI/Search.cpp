@@ -10,6 +10,7 @@
 
 #include "libslic3r/PrintConfig.hpp"
 #include "GUI_App.hpp"
+#include "Plater.hpp"
 #include "Tab.hpp"
 #include "PresetBundle.hpp"
 
@@ -26,6 +27,12 @@ using GUI::from_u8;
 using GUI::into_u8;
 
 namespace Search {
+
+// Does our wxWidgets version support markup?
+// https://github.com/prusa3d/PrusaSlicer/issues/4282#issuecomment-634676371
+#if wxUSE_MARKUP && wxCHECK_VERSION(3, 1, 1)
+    #define SEARCH_SUPPORTS_MARKUP
+#endif
 
 static const std::vector<std::wstring>& NameByType()
 {
@@ -270,8 +277,14 @@ bool OptionsSearcher::search(const std::string& search, bool force/* = false*/)
             label += L"  [" + std::to_wstring(score) + L"]";// add score value
 	        std::string label_u8 = into_u8(label);
 	        std::string label_plain = label_u8;
-	        boost::replace_all(label_plain, std::string(1, char(ImGui::ColorMarkerStart)), "<b>");
-	        boost::replace_all(label_plain, std::string(1, char(ImGui::ColorMarkerEnd)),   "</b>");
+
+#ifdef SEARCH_SUPPORTS_MARKUP
+            boost::replace_all(label_plain, std::string(1, char(ImGui::ColorMarkerStart)), "<b>");
+            boost::replace_all(label_plain, std::string(1, char(ImGui::ColorMarkerEnd)),   "</b>");
+#else
+            boost::erase_all(label_plain, std::string(1, char(ImGui::ColorMarkerStart)));
+            boost::erase_all(label_plain, std::string(1, char(ImGui::ColorMarkerEnd)));
+#endif
 	        found.emplace_back(FoundOption{ label_plain, label_u8, boost::nowide::narrow(get_tooltip(opt)), i, score });
         }
     }
@@ -442,9 +455,11 @@ SearchDialog::SearchDialog(OptionsSearcher* searcher)
     search_list->AppendBitmapColumn("", SearchListModel::colIcon);
 
     wxDataViewTextRenderer* const markupRenderer = new wxDataViewTextRenderer();
-#if wxUSE_MARKUP
+
+#ifdef SEARCH_SUPPORTS_MARKUP
     markupRenderer->EnableMarkup();
-#endif // wxUSE_MARKUP
+#endif
+
     search_list->AppendColumn(new wxDataViewColumn("", markupRenderer, SearchListModel::colMarkedText, wxCOL_WIDTH_AUTOSIZE, wxALIGN_LEFT));
 
     search_list->GetColumn(SearchListModel::colIcon      )->SetWidth(3  * em_unit());
@@ -483,11 +498,18 @@ SearchDialog::SearchDialog(OptionsSearcher* searcher)
     search_list->GetMainWindow()->Bind(wxEVT_LEFT_DOWN, &SearchDialog::OnLeftDown, this);
 #endif //__WXMSW__
 
+    // Under OSX mouse and key states didn't fill after wxEVT_DATAVIEW_SELECTION_CHANGED call
+    // As a result, we can't to identify what kind of actions was done
+    // So, under OSX is used OnKeyDown function to navigate inside the list
+#ifdef __APPLE__
+    search_list->Bind(wxEVT_KEY_DOWN, &SearchDialog::OnKeyDown, this);
+#endif
+
     check_category->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
     if (check_english)
         check_english ->Bind(wxEVT_CHECKBOX, &SearchDialog::OnCheck, this);
 
-    Bind(wxEVT_MOTION, &SearchDialog::OnMotion, this);
+//    Bind(wxEVT_MOTION, &SearchDialog::OnMotion, this);
     Bind(wxEVT_LEFT_DOWN, &SearchDialog::OnLeftDown, this);
 
     SetSizer(topSizer);
@@ -585,11 +607,16 @@ void SearchDialog::OnSelect(wxDataViewEvent& event)
     if (prevent_list_events)
         return;    
 
+    // Under OSX mouse and key states didn't fill after wxEVT_DATAVIEW_SELECTION_CHANGED call
+    // As a result, we can't to identify what kind of actions was done
+    // So, under OSX is used OnKeyDown function to navigate inside the list
+#ifndef __APPLE__
     // wxEVT_DATAVIEW_SELECTION_CHANGED is processed, when selection is changed after mouse click or press the Up/Down arrows
     // But this two cases should be processed in different way:
     // Up/Down arrows   -> leave it as it is (just a navigation)
     // LeftMouseClick   -> call the ProcessSelection function  
     if (wxGetMouseState().LeftIsDown())
+#endif //__APPLE__
         ProcessSelection(search_list->GetSelection());
 }
 
@@ -653,6 +680,14 @@ void SearchDialog::on_dpi_changed(const wxRect& suggested_rect)
     SetMinSize(size);
 
     Fit();
+    Refresh();
+}
+
+void SearchDialog::on_sys_color_changed()
+{
+    // msw_rescale updates just icons, so use it
+    search_list_model->msw_rescale();
+
     Refresh();
 }
 

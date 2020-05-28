@@ -2,12 +2,16 @@
 #include "GUI_ObjectList.hpp"
 #include "I18N.hpp"
 
+#include "GLCanvas3D.hpp"
 #include "OptionsGroup.hpp"
+#include "GUI_App.hpp"
 #include "wxExtensions.hpp"
 #include "PresetBundle.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/Geometry.hpp"
 #include "Selection.hpp"
+#include "Plater.hpp"
+#include "MainFrame.hpp"
 
 #include <boost/algorithm/string.hpp>
 #include "slic3r/Utils/FixModelByWin10.hpp"
@@ -417,6 +421,8 @@ ObjectManipulation::ObjectManipulation(wxWindow* parent) :
     m_main_grid_sizer->Add(editors_grid_sizer, 1, wxEXPAND);
 
     m_check_inch = new wxCheckBox(parent, wxID_ANY, "Inches");
+    m_check_inch->SetFont(wxGetApp().normal_font());
+
     m_check_inch->SetValue(m_imperial_units);
     m_check_inch->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) {
         wxGetApp().app_config->set("use_inches", m_check_inch->GetValue() ? "1" : "0");
@@ -979,6 +985,23 @@ void ObjectManipulation::msw_rescale()
     m_check_inch->SetMinSize(wxSize(-1, int(1.5f * m_check_inch->GetFont().GetPixelSize().y + 0.5f)));
 
     get_og()->msw_rescale();
+}
+
+void ObjectManipulation::sys_color_changed()
+{
+    // btn...->msw_rescale() updates icon on button, so use it
+    m_mirror_bitmap_on.msw_rescale();
+    m_mirror_bitmap_off.msw_rescale();
+    m_mirror_bitmap_hidden.msw_rescale();
+    m_reset_scale_button->msw_rescale();
+    m_reset_rotation_button->msw_rescale();
+    m_drop_to_bed_button->msw_rescale();
+    m_lock_bnt->msw_rescale();
+
+    for (int id = 0; id < 3; ++id)
+        m_mirror_buttons[id].first->msw_rescale();
+
+    get_og()->sys_color_changed();
 }
 
 static const char axes[] = { 'x', 'y', 'z' };

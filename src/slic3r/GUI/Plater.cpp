@@ -771,7 +771,9 @@ Sidebar::Sidebar(Plater *parent)
     p->scrolled->SetScrollbars(0, 100, 1, 2);
 
     SetFont(wxGetApp().normal_font());
+#ifndef __APPLE__
     SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+#endif
 
     // Sizer in the scrolled area
     auto *scrolled_sizer = new wxBoxSizer(wxVERTICAL);
@@ -1086,6 +1088,34 @@ void Sidebar::msw_rescale()
     const int scaled_height = p->btn_remove_device->GetBitmap().GetHeight() + 4;
     p->btn_export_gcode->SetMinSize(wxSize(-1, scaled_height));
     p->btn_reslice     ->SetMinSize(wxSize(-1, scaled_height));
+
+    p->scrolled->Layout();
+}
+
+void Sidebar::sys_color_changed()
+{
+    // Update preset comboboxes in respect to the system color ...
+    // combo->msw_rescale() updates icon on button, so use it
+    for (PresetComboBox* combo : std::vector<PresetComboBox*>{  p->combo_print,
+                                                                p->combo_sla_print,
+                                                                p->combo_sla_material,
+                                                                p->combo_printer })
+        combo->msw_rescale();
+    for (PresetComboBox* combo : p->combos_filament)
+        combo->msw_rescale();
+
+    // ... then refill them and set min size to correct layout of the sidebar
+    update_all_preset_comboboxes();
+
+    p->object_list->sys_color_changed();
+    p->object_manipulation->sys_color_changed();
+//    p->object_settings->msw_rescale();
+    p->object_layers->sys_color_changed();
+
+    // btn...->msw_rescale() updates icon on button, so use it
+    p->btn_send_gcode->msw_rescale();
+    p->btn_remove_device->msw_rescale();
+    p->btn_export_gcode_removable->msw_rescale();
 
     p->scrolled->Layout();
 }
@@ -2267,9 +2297,9 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
             if (imperial_units)
                 convert_from_imperial_units(model);
             else if (model.looks_like_imperial_units()) {
-                wxMessageDialog msg_dlg(q, _L(
-                    "This model looks like saved in inches.\n"
-                    "Should I consider this model as a saved in inches and convert it?") + "\n",
+                wxMessageDialog msg_dlg(q, format_wxstr(_L(
+                    "Some object(s) in file %s looks like saved in inches.\n"
+                    "Should I consider them as a saved in inches and convert them?"), from_path(filename)) + "\n",
                     _L("Saved in inches object detected"), wxICON_WARNING | wxYES | wxNO);
                 if (msg_dlg.ShowModal() == wxID_YES)
                     convert_from_imperial_units(model);
@@ -2596,7 +2626,7 @@ void Plater::priv::object_list_changed()
 {
     const bool export_in_progress = this->background_process.is_export_scheduled(); // || ! send_gcode_file.empty());
     // XXX: is this right?
-    const bool model_fits = view3D->check_volumes_outside_state() == ModelInstance::PVS_Inside;
+    const bool model_fits = view3D->check_volumes_outside_state() == ModelInstancePVS_Inside;
 
     sidebar->enable_buttons(!model.objects.empty() && !export_in_progress && model_fits);
 }
@@ -3288,7 +3318,7 @@ void Plater::priv::set_current_panel(wxPanel* panel)
         // see: Plater::priv::object_list_changed()
         // FIXME: it may be better to have a single function making this check and let it be called wherever needed
         bool export_in_progress = this->background_process.is_export_scheduled();
-        bool model_fits = view3D->check_volumes_outside_state() != ModelInstance::PVS_Partly_Outside;
+        bool model_fits = view3D->check_volumes_outside_state() != ModelInstancePVS_Partly_Outside;
         if (!model.objects.empty() && !export_in_progress && model_fits)
             this->q->reslice();
         // keeps current gcode preview, if any
@@ -3724,6 +3754,9 @@ bool Plater::priv::init_common_menu(wxMenu* menu, const bool is_part/* = false*/
 
         menu->AppendSeparator();
 
+        // "Scale to print volume" makes a sense just for whole object
+        sidebar->obj_list()->append_menu_item_scale_selection_to_fit_print_volume(menu);
+
         q->Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& evt) {
             const Selection& selection = get_selection();
             int instance_idx = selection.get_instance_idx();
@@ -3736,9 +3769,8 @@ bool Plater::priv::init_common_menu(wxMenu* menu, const bool is_part/* = false*/
             }, menu_item_printable->GetId());
     }
 
+    sidebar->obj_list()->append_menu_items_convert_unit(menu);
     sidebar->obj_list()->append_menu_item_fix_through_netfabb(menu);
-
-    sidebar->obj_list()->append_menu_item_scale_selection_to_fit_print_volume(menu);
 
     wxMenu* mirror_menu = new wxMenu();
     if (mirror_menu == nullptr)
@@ -4313,7 +4345,7 @@ void Sidebar::set_btn_label(const ActionButtonType btn_type, const wxString& lab
 // Plater / Public
 
 Plater::Plater(wxWindow *parent, MainFrame *main_frame)
-    : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(76 * wxGetApp().em_unit(), 49 * wxGetApp().em_unit()))
+    : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxGetApp().get_min_size())
     , p(new priv(this, main_frame))
 {
     // Initialization performed in the private c-tor
@@ -4563,6 +4595,37 @@ bool Plater::is_selection_empty() const
 void Plater::scale_selection_to_fit_print_volume()
 {
     p->scale_selection_to_fit_print_volume();
+}
+
+void Plater::convert_unit(bool from_imperial_unit)
+{
+    std::vector<int> obj_idxs, volume_idxs;
+    wxGetApp().obj_list()->get_selection_indexes(obj_idxs, volume_idxs);
+    if (obj_idxs.empty() && volume_idxs.empty())
+        return;
+
+    TakeSnapshot snapshot(this, from_imperial_unit ? _L("Convert from imperial units") : _L("Convert to imperial units"));
+    wxBusyCursor wait;
+
+    ModelObjectPtrs objects;
+    for (int obj_idx : obj_idxs) {
+        ModelObject *object = p->model.objects[obj_idx];
+        object->convert_units(objects, from_imperial_unit, volume_idxs);
+        remove(obj_idx);
+    }
+    p->load_model_objects(objects);
+    
+    Selection& selection = p->view3D->get_canvas3d()->get_selection();
+    size_t last_obj_idx = p->model.objects.size() - 1;
+
+    if (volume_idxs.empty()) {
+        for (size_t i = 0; i < objects.size(); ++i)
+            selection.add_object((unsigned int)(last_obj_idx - i), i == 0);
+    }
+    else {
+        for (int vol_idx : volume_idxs)
+            selection.add_volume(last_obj_idx, vol_idx, 0, false);
+    }
 }
 
 void Plater::cut(size_t obj_idx, size_t instance_idx, coordf_t z, bool keep_upper, bool keep_lower, bool rotate_lower)
@@ -5436,6 +5499,17 @@ void Plater::msw_rescale()
 
     p->sidebar->msw_rescale();
 
+    p->msw_rescale_object_menu();
+
+    Layout();
+    GetParent()->Layout();
+}
+
+void Plater::sys_color_changed()
+{
+    p->sidebar->sys_color_changed();
+
+    // msw_rescale_menu updates just icons, so use it
     p->msw_rescale_object_menu();
 
     Layout();

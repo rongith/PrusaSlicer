@@ -4,13 +4,13 @@
 #include "GUI_ObjectLayers.hpp"
 #include "GUI_App.hpp"
 #include "I18N.hpp"
+#include "Plater.hpp"
 
 #include "OptionsGroup.hpp"
 #include "PresetBundle.hpp"
 #include "Tab.hpp"
 #include "wxExtensions.hpp"
 #include "libslic3r/Model.hpp"
-#include "LambdaObjectDialog.hpp"
 #include "GLCanvas3D.hpp"
 #include "Selection.hpp"
 
@@ -331,6 +331,34 @@ void ObjectList::get_selected_item_indexes(int& obj_idx, int& vol_idx, const wxD
                 type & itVolume ? m_objects_model->GetIdByItem(m_objects_model->GetTopParent(item)) : -1;
 
     vol_idx =   type & itVolume ? m_objects_model->GetVolumeIdByItem(item) : -1;
+}
+
+void ObjectList::get_selection_indexes(std::vector<int>& obj_idxs, std::vector<int>& vol_idxs)
+{
+    wxDataViewItemArray sels;
+    GetSelections(sels);
+    assert(!sels.IsEmpty());
+
+    if (m_objects_model->GetItemType(sels[0]) & itVolume) {
+        for (wxDataViewItem item : sels) {
+            obj_idxs.emplace_back(m_objects_model->GetIdByItem(m_objects_model->GetTopParent(item)));
+
+            assert(m_objects_model->GetItemType(item) & itVolume);
+            vol_idxs.emplace_back(m_objects_model->GetVolumeIdByItem(item));
+        }
+    }
+    else {
+        for (wxDataViewItem item : sels) {
+            const ItemType type = m_objects_model->GetItemType(item);
+            assert(type & itObject | itInstance | itInstanceRoot);
+
+            obj_idxs.emplace_back(type & itObject ? m_objects_model->GetIdByItem(item) :
+                                  m_objects_model->GetIdByItem(m_objects_model->GetTopParent(item)));
+        }
+    }
+
+    std::sort(obj_idxs.begin(), obj_idxs.end(), std::greater<int>());
+    obj_idxs.erase(std::unique(obj_idxs.begin(), obj_idxs.end()), obj_idxs.end());
 }
 
 int ObjectList::get_mesh_errors_count(const int obj_idx, const int vol_idx /*= -1*/) const
@@ -1744,6 +1772,31 @@ void ObjectList::append_menu_item_scale_selection_to_fit_print_volume(wxMenu* me
         [](wxCommandEvent&) { wxGetApp().plater()->scale_selection_to_fit_print_volume(); }, "", menu);
 }
 
+void ObjectList::append_menu_items_convert_unit(wxMenu* menu)
+{
+    append_menu_item(menu, wxID_ANY, _L("Convert from imperial unit"), _L("Convert from imperial unit"),
+        [](wxCommandEvent&) { wxGetApp().plater()->convert_unit(true); }, "", menu);
+
+    append_menu_item(menu, wxID_ANY, _L("Convert to imperial unit"), _L("Convert to imperial unit"),
+        [](wxCommandEvent&) { wxGetApp().plater()->convert_unit(false); }, "", menu);
+}
+
+void ObjectList::append_menu_item_merge_to_multipart_object(wxMenu* menu)
+{
+    menu->AppendSeparator();
+    append_menu_item(menu, wxID_ANY, _L("Merge"), _L("Merge objects to the one multipart object"),
+        [this](wxCommandEvent&) { merge(true); }, "", menu,
+        [this]() { return this->can_merge_to_multipart_object(); }, wxGetApp().plater());
+}
+
+void ObjectList::append_menu_item_merge_to_single_object(wxMenu* menu)
+{
+    menu->AppendSeparator();
+    append_menu_item(menu, wxID_ANY, _L("Merge"), _L("Merge objects to the one single object"),
+        [this](wxCommandEvent&) { merge(false); }, "", menu,
+        [this]() { return this->can_merge_to_single_object(); }, wxGetApp().plater());
+}
+
 void ObjectList::create_object_popupmenu(wxMenu *menu)
 {
 #ifdef __WXOSX__  
@@ -1751,12 +1804,17 @@ void ObjectList::create_object_popupmenu(wxMenu *menu)
 #endif // __WXOSX__
 
     append_menu_item_reload_from_disk(menu);
+    append_menu_items_convert_unit(menu);
     append_menu_item_export_stl(menu);
     append_menu_item_fix_through_netfabb(menu);
     append_menu_item_scale_selection_to_fit_print_volume(menu);
 
     // Split object to parts
     append_menu_item_split(menu);
+//    menu->AppendSeparator();
+
+    // Merge multipart object to the single object
+//    append_menu_item_merge_to_single_object(menu);
     menu->AppendSeparator();
 
     // Layers Editing for object
@@ -1775,6 +1833,7 @@ void ObjectList::create_sla_object_popupmenu(wxMenu *menu)
 #endif // __WXOSX__
 
     append_menu_item_reload_from_disk(menu);
+    append_menu_items_convert_unit(menu);
     append_menu_item_export_stl(menu);
     append_menu_item_fix_through_netfabb(menu);
     // rest of a object_sla_menu will be added later in:
@@ -1788,6 +1847,7 @@ void ObjectList::create_part_popupmenu(wxMenu *menu)
 #endif // __WXOSX__
 
     append_menu_item_reload_from_disk(menu);
+    append_menu_items_convert_unit(menu);
     append_menu_item_export_stl(menu);
     append_menu_item_fix_through_netfabb(menu);
 
@@ -2325,6 +2385,190 @@ void ObjectList::split()
     changed_object(obj_idx);
 }
 
+void ObjectList::merge(bool to_multipart_object)
+{
+    // merge selected objects to the multipart object
+    if (to_multipart_object)
+    {
+        auto get_object_idxs = [this](std::vector<int>& obj_idxs, wxDataViewItemArray& sels)
+        {
+            // check selections and split instances to the separated objects...
+            bool instance_selection = false;
+            for (wxDataViewItem item : sels)
+                if (m_objects_model->GetItemType(item) & itInstance) {
+                    instance_selection = true;
+                    break;
+                }
+
+            if (!instance_selection)
+            {
+                for (wxDataViewItem item : sels) {
+                    assert(m_objects_model->GetItemType(item) & itObject);
+                    obj_idxs.emplace_back(m_objects_model->GetIdByItem(item));
+                }
+                return;
+            }
+
+            // map of obj_idx -> set of selected instance_idxs
+            std::map<int, std::set<int>> sel_map;
+            std::set<int> empty_set;
+            for (wxDataViewItem item : sels) {
+                if (m_objects_model->GetItemType(item) & itObject)
+                {
+                    int obj_idx = m_objects_model->GetIdByItem(item);
+                    int inst_cnt = (*m_objects)[obj_idx]->instances.size();
+                    if (inst_cnt == 1)
+                        sel_map.emplace(obj_idx, empty_set);
+                    else
+                        for (int i = 0; i < inst_cnt; i++)
+                            sel_map[obj_idx].emplace(i);
+                    continue;
+                }
+                int obj_idx = m_objects_model->GetIdByItem(m_objects_model->GetTopParent(item));
+                sel_map[obj_idx].emplace(m_objects_model->GetInstanceIdByItem(item));
+            }
+
+            // all objects, created from the instances will be added to the end of list
+            int new_objects_cnt = 0; // count of this new objects
+//            std::vector<int> obj_idxs;
+
+            for (auto map_item : sel_map)
+            {
+                int obj_idx = map_item.first;
+                // object with just 1 instance
+                if (map_item.second.empty()) {
+                    obj_idxs.emplace_back(obj_idx);
+                    continue;
+                }
+
+                // object with selected all instances
+                if ((*m_objects)[map_item.first]->instances.size() == map_item.second.size()) {
+                    instances_to_separated_objects(obj_idx);
+                    // first instance stay on its own place and another all add to the end of list :
+                    obj_idxs.emplace_back(obj_idx);
+                    new_objects_cnt += map_item.second.size() - 1;
+                    continue;
+                }
+
+                // object with selected some of instances 
+                instances_to_separated_object(obj_idx, map_item.second);
+
+                if (map_item.second.size() == 1)
+                    new_objects_cnt += 1;
+                else {// we should split to separate instances last object
+                    instances_to_separated_objects(m_objects->size() - 1);
+                    // all instances will stay at the end of list :
+                    new_objects_cnt += map_item.second.size();
+                }
+            }
+
+            // all instatnces are extracted to the separate objects and should be selected
+            m_prevent_list_events = true;
+            sels.Clear();
+            for (int obj_idx : obj_idxs)
+                sels.Add(m_objects_model->GetItemById(obj_idx));
+            int obj_cnt = m_objects->size();
+            for (int obj_idx = obj_cnt - new_objects_cnt; obj_idx < obj_cnt; obj_idx++) {
+                sels.Add(m_objects_model->GetItemById(obj_idx));
+                obj_idxs.emplace_back(obj_idx);
+            }
+            UnselectAll();
+            SetSelections(sels);
+            assert(!sels.IsEmpty());
+            m_prevent_list_events = false;
+        };
+
+        std::vector<int> obj_idxs;
+        wxDataViewItemArray sels;
+        GetSelections(sels);
+        assert(!sels.IsEmpty());
+
+        Plater::TakeSnapshot snapshot(wxGetApp().plater(), _L("Merge"));
+
+        get_object_idxs(obj_idxs, sels);
+
+        // resulted objects merge to the one
+        Model* model = (*m_objects)[0]->get_model();
+        ModelObject* new_object = model->add_object();
+        new_object->name = _u8L("Merged");
+        DynamicPrintConfig* config = &new_object->config;
+
+        int frst_obj_idx = obj_idxs.front();
+        const Vec3d& main_offset  = (*m_objects)[frst_obj_idx]->instances[0]->get_offset();
+
+        for (int obj_idx : obj_idxs)
+        {
+            ModelObject* object = (*m_objects)[obj_idx];
+            Vec3d offset = object->instances[0]->get_offset();
+
+            if (object->id() == (*m_objects)[frst_obj_idx]->id())
+                new_object->add_instance(*object->instances[0]);
+            auto new_opt_keys = config->keys();
+
+            const DynamicPrintConfig& from_config = object->config;
+            auto opt_keys = from_config.keys();
+
+            // merge settings
+            for (auto& opt_key : opt_keys) {
+                if (find(new_opt_keys.begin(), new_opt_keys.end(), opt_key) == new_opt_keys.end()) {
+                    const ConfigOption* option = from_config.option(opt_key);
+                    if (!option) {
+                        // if current option doesn't exist in prints.get_edited_preset(),
+                        // get it from default config values
+                        option = DynamicPrintConfig::new_from_defaults_keys({ opt_key })->option(opt_key);
+                    }
+                    config->set_key_value(opt_key, option->clone());
+                }
+            }
+
+            // merge volumes
+            for (const ModelVolume* volume : object->volumes) {
+                ModelVolume* new_volume = new_object->add_volume(*volume);
+                Vec3d vol_offset = offset - main_offset + new_volume->get_offset();
+                new_volume->set_offset(vol_offset);
+            }
+            // save extruder value if it was set
+            if (object->volumes.size() == 1 && find(opt_keys.begin(), opt_keys.end(), "extruder") != opt_keys.end()) {
+                ModelVolume* volume = new_object->volumes.back();
+                const ConfigOption* option = from_config.option("extruder");
+                if (option) 
+                    volume->config.set_key_value("extruder", option->clone());
+            }
+
+            // merge layers
+            for (const auto& range : object->layer_config_ranges)
+                new_object->layer_config_ranges.emplace(range);
+        }
+        // remove selected objects
+        remove();
+
+        // Add new object(merged) to the object_list
+        add_object_to_list(m_objects->size() - 1);
+        select_item(m_objects_model->GetItemById(m_objects->size() - 1));
+        update_selections_on_canvas();
+    }
+    // merge all parts to the one single object
+    // all part's settings will be lost
+    else
+    {
+        wxDataViewItem item = GetSelection();
+        if (!item)
+            return;
+        const int obj_idx = m_objects_model->GetIdByItem(item);
+        if (obj_idx == -1)
+            return;
+
+        Plater::TakeSnapshot snapshot(wxGetApp().plater(), _L("Merge all parts to the one single object"));
+
+        ModelObject* model_object = (*m_objects)[obj_idx];
+        model_object->merge();
+
+        m_objects_model->DeleteVolumeChildren(item);
+
+        changed_object(obj_idx);
+    }
+}
+
 void ObjectList::layers_editing()
 {
     const Selection& selection = scene_selection();
@@ -2448,6 +2692,31 @@ bool ObjectList::can_split_instances()
 {
     const Selection& selection = scene_selection();
     return selection.is_multiple_full_instance() || selection.is_single_full_instance();
+}
+
+bool ObjectList::can_merge_to_multipart_object() const
+{
+    wxDataViewItemArray sels;
+    GetSelections(sels);
+    if (sels.IsEmpty())
+        return false;
+
+    // should be selected just objects
+    for (wxDataViewItem item : sels)
+        if (!(m_objects_model->GetItemType(item) & (itObject | itInstance)))
+            return false;
+
+    return true;
+}
+
+bool ObjectList::can_merge_to_single_object() const
+{
+    int obj_idx = get_selected_obj_idx();
+    if (obj_idx < 0)
+        return false;
+
+    // selected object should be multipart
+    return (*m_objects)[obj_idx]->volumes.size() > 1;
 }
 
 // NO_PARAMETERS function call means that changed object index will be determine from Selection() 
@@ -3989,6 +4258,26 @@ void ObjectList::msw_rescale()
     Layout();
 }
 
+void ObjectList::sys_color_changed()
+{
+    // msw_rescale_icons() updates icons, so use it
+    msw_rescale_icons();
+
+    // update existing items with bitmaps
+    m_objects_model->Rescale();
+
+    // msw_rescale_menu updates just icons, so use it
+    for (MenuWithSeparators* menu : { &m_menu_object, 
+                                      &m_menu_part, 
+                                      &m_menu_sla_object, 
+                                      &m_menu_instance, 
+                                      &m_menu_layer,
+                                      &m_menu_default})
+        msw_rescale_menu(menu);
+
+    Layout();
+}
+
 void ObjectList::ItemValueChanged(wxDataViewEvent &event)
 {
     if (event.GetColumn() == colName)
@@ -4049,6 +4338,9 @@ void ObjectList::show_multi_selection_menu()
         [this](wxCommandEvent&) { wxGetApp().plater()->reload_from_disk(); }, "", menu, []() {
         return wxGetApp().plater()->can_reload_from_disk();
     }, wxGetApp().plater());
+
+    append_menu_items_convert_unit(menu);
+    append_menu_item_merge_to_multipart_object(menu);
 
     wxGetApp().plater()->PopupMenu(menu);
 }

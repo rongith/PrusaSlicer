@@ -6,6 +6,7 @@
 #include "libslic3r/SLAPrint.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/GUI/Camera.hpp"
+#include "slic3r/GUI/Plater.hpp"
 
 #include <GL/glew.h>
 
@@ -342,15 +343,11 @@ void ObjectClipper::render_cut() const
         clipper->set_plane(*m_clp);
         clipper->set_transformation(trafo);
 
-        if (! clipper->get_triangles().empty()) {
-            ::glPushMatrix();
-            ::glColor3f(1.0f, 0.37f, 0.0f);
-            ::glBegin(GL_TRIANGLES);
-            for (const Vec3f& point : clipper->get_triangles())
-                ::glVertex3f(point(0), point(1), point(2));
-            ::glEnd();
-            ::glPopMatrix();
-        }
+        ::glPushMatrix();
+        ::glColor3f(1.0f, 0.37f, 0.0f);
+        clipper->render_cut();
+        ::glPopMatrix();
+
         ++clipper_id;
     }
 }
@@ -457,15 +454,10 @@ void SupportsClipper::render_cut() const
     m_clipper->set_plane(*ocl->get_clipping_plane());
     m_clipper->set_transformation(supports_trafo);
 
-    if (! m_clipper->get_triangles().empty()) {
-        ::glPushMatrix();
-        ::glColor3f(1.0f, 0.f, 0.37f);
-        ::glBegin(GL_TRIANGLES);
-        for (const Vec3f& point : m_clipper->get_triangles())
-            ::glVertex3f(point(0), point(1), point(2));
-        ::glEnd();
-        ::glPopMatrix();
-    }
+    ::glPushMatrix();
+    ::glColor3f(1.0f, 0.f, 0.37f);
+    m_clipper->render_cut();
+    ::glPopMatrix();
 }
 
 

@@ -25,9 +25,12 @@ namespace Slic3r {
 
 class Model;
 class ModelObject;
+class ModelInstance;
 class Print;
 class SLAPrint;
 enum SLAPrintObjectStep : unsigned int;
+
+using ModelInstancePtrs = std::vector<ModelInstance*>;
 
 namespace UndoRedo {
     class Stack;
@@ -105,6 +108,7 @@ public:
     void update_mode_sizer() const;
     void update_reslice_btn_tooltip() const;
     void msw_rescale();
+    void sys_color_changed();
     void search();
     void jump_to_option(size_t selected);
 
@@ -212,6 +216,7 @@ public:
     void set_number_of_copies(/*size_t num*/);
     bool is_selection_empty() const;
     void scale_selection_to_fit_print_volume();
+    void convert_unit(bool from_imperial_unit);
 
     void cut(size_t obj_idx, size_t instance_idx, coordf_t z, bool keep_upper = true, bool keep_lower = true, bool rotate_lower = false);
 
@@ -307,6 +312,7 @@ public:
     bool can_reload_from_disk() const;
 
     void msw_rescale();
+    void sys_color_changed();
 
     bool init_view_toolbar();
 

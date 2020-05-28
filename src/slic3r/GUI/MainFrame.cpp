@@ -29,6 +29,7 @@
 #include "InstanceCheck.hpp"
 #include "I18N.hpp"
 #include "GLCanvas3D.hpp"
+#include "Plater.hpp"
 
 #include <fstream>
 #include "GUI_App.hpp"
@@ -89,6 +90,19 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxDEFAULT_FRAME_S
 
     m_loaded = true;
 
+#ifdef __APPLE__
+    // Using SetMinSize() on Mac messes up the window position in some cases
+    // cf. https://groups.google.com/forum/#!topic/wx-users/yUKPBBfXWO0
+    // So, if we haven't possibility to set MinSize() for the MainFrame, 
+    // set the MinSize() as a half of regular  for the m_plater and m_tabpanel, when settings layout is in slNew mode
+    // Otherwise, MainFrame will be maximized by height
+    if (slNew) {
+        wxSize size = wxGetApp().get_min_size();
+        size.SetHeight(int(0.5*size.GetHeight()));
+        m_plater->SetMinSize(size);
+        m_tabpanel->SetMinSize(size);
+    }
+#endif
     // initialize layout
     auto sizer = new wxBoxSizer(wxVERTICAL);
     if (m_plater && m_layout != slOld)
@@ -101,7 +115,7 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxDEFAULT_FRAME_S
     SetSizer(sizer);
     Fit();
 
-    const wxSize min_size = wxSize(76*wxGetApp().em_unit(), 49*wxGetApp().em_unit());
+    const wxSize min_size = wxGetApp().get_min_size(); //wxSize(76*wxGetApp().em_unit(), 49*wxGetApp().em_unit());
 #ifdef __APPLE__
     // Using SetMinSize() on Mac messes up the window position in some cases
     // cf. https://groups.google.com/forum/#!topic/wx-users/yUKPBBfXWO0
@@ -189,6 +203,29 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxDEFAULT_FRAME_S
             m_plater->on_activate();
         event.Skip();
     });
+
+    /*
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& event)
+    {
+        bool recreate_gui = false;
+        {
+            // the dialog needs to be destroyed before the call to recreate_gui()
+            // or sometimes the application crashes into wxDialogBase() destructor
+            // so we put it into an inner scope
+            wxMessageDialog dialog(nullptr,
+                                   _L("System color mode was changed. "
+                                      "It is possible to update the Slicer in respect to the system mode.") + "\n" +
+                                   _L("You will lose content of the plater.") + "\n\n" +
+                                   _L("Do you want to proceed?"),
+                                   wxString(SLIC3R_APP_NAME) + " - " + _L("Switching system color mode"),
+                                   wxICON_QUESTION | wxOK | wxCANCEL);
+            recreate_gui = dialog.ShowModal() == wxID_OK;
+        }
+        if (recreate_gui)
+            wxGetApp().recreate_GUI(_L("Changing of an application in respect to the system mode") + dots);
+        event.Skip();
+    });
+    */
 
     wxGetApp().persist_window_geometry(this, true);
 
@@ -525,8 +562,9 @@ void MainFrame::on_dpi_changed(const wxRect &suggested_rect)
     wxGetApp().plater()->msw_rescale();
 
     // update Tabs
-    for (auto tab : wxGetApp().tabs_list)
-        tab->msw_rescale();
+    if (m_layout != slDlg) // Update tabs later, from the SettingsDialog, when the Settings are in the separated dialog
+        for (auto tab : wxGetApp().tabs_list)
+            tab->msw_rescale();
 
     wxMenuBar* menu_bar = this->GetMenuBar();
     for (size_t id = 0; id < menu_bar->GetMenuCount(); id++)
@@ -552,6 +590,28 @@ void MainFrame::on_dpi_changed(const wxRect &suggested_rect)
     this->SetSize(sz);
 
     this->Maximize(is_maximized);
+}
+
+void MainFrame::on_sys_color_changed()
+{
+    wxBusyCursor wait;
+
+    // update label colors in respect to the system mode
+    wxGetApp().init_label_colours();
+
+    wxGetApp().preset_bundle->load_default_preset_bitmaps();
+
+    // update Plater
+    wxGetApp().plater()->sys_color_changed();
+
+    // update Tabs
+    for (auto tab : wxGetApp().tabs_list)
+        tab->sys_color_changed();
+
+    // msw_rescale_menu updates just icons, so use it
+    wxMenuBar* menu_bar = this->GetMenuBar();
+    for (size_t id = 0; id < menu_bar->GetMenuCount(); id++)
+        msw_rescale_menu(menu_bar->GetMenu(id));
 }
 
 void MainFrame::init_menubar()
@@ -1426,7 +1486,7 @@ SettingsDialog::SettingsDialog(MainFrame* mainframe)
 
     // wxNB_NOPAGETHEME: Disable Windows Vista theme for the Notebook background. The theme performance is terrible on Windows 10
     // with multiple high resolution displays connected.
-    m_tabpanel = new wxNotebook(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxNB_TOP | wxTAB_TRAVERSAL | wxNB_NOPAGETHEME);
+    m_tabpanel = new wxNotebook(this, wxID_ANY, wxDefaultPosition, wxGetApp().get_min_size(), wxNB_TOP | wxTAB_TRAVERSAL | wxNB_NOPAGETHEME);
 #ifndef __WXOSX__ // Don't call SetFont under OSX to avoid name cutting in ObjectList
     m_tabpanel->SetFont(Slic3r::GUI::wxGetApp().normal_font());
 #endif
@@ -1472,6 +1532,10 @@ void SettingsDialog::on_dpi_changed(const wxRect& suggested_rect)
 {
     const int& em = em_unit();
     const wxSize& size = wxSize(85 * em, 50 * em);
+
+    // update Tabs
+    for (auto tab : wxGetApp().tabs_list)
+        tab->msw_rescale();
 
     SetMinSize(size);
     Fit();

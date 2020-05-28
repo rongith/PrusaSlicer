@@ -36,6 +36,9 @@
 #include "GUI_Utils.hpp"
 #include "AppConfig.hpp"
 #include "PresetBundle.hpp"
+#include "3DScene.hpp"
+#include "MainFrame.hpp"
+#include "Plater.hpp"
 
 #include "../Utils/PresetUpdater.hpp"
 #include "../Utils/PrintHost.hpp"
@@ -578,6 +581,11 @@ void GUI_App::set_label_clr_sys(const wxColour& clr) {
     std::string str = clr_str.ToStdString();
     app_config->set("label_clr_sys", str);
     app_config->save();
+}
+
+wxSize GUI_App::get_min_size() const
+{
+    return wxSize(76*m_em_unit, 49 * m_em_unit);
 }
 
 float GUI_App::toolbar_icon_scale(const bool is_limited/* = false*/) const

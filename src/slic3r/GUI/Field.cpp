@@ -3,6 +3,8 @@
 #include "I18N.hpp"
 #include "Field.hpp"
 #include "wxExtensions.hpp"
+#include "Plater.hpp"
+#include "MainFrame.hpp"
 
 #include "libslic3r/PrintConfig.hpp"
 
@@ -304,6 +306,12 @@ void Field::msw_rescale(bool rescale_sidetext)
 		m_side_text->SetSize(size);
 		m_side_text->SetMinSize(size);
 	}
+}
+
+void Field::sys_color_changed()
+{
+	m_Undo_to_sys_btn->msw_rescale();
+	m_Undo_btn->msw_rescale();
 }
 
 template<class T>

@@ -5,7 +5,6 @@
 #include <memory>
 #include <chrono>
 
-#include "3DScene.hpp"
 #include "GLToolbar.hpp"
 #include "GLShader.hpp"
 #include "Event.hpp"
@@ -14,6 +13,8 @@
 #include "GUI_ObjectLayers.hpp"
 #include "GLSelectionRectangle.hpp"
 #include "MeshUtils.hpp"
+
+#include "libslic3r/Slicing.hpp"
 
 #include <float.h>
 
@@ -33,13 +34,16 @@ class wxGLContext;
 
 namespace Slic3r {
 
-class Bed3D;
 struct Camera;
 class BackgroundSlicingProcess;
 class GCodePreviewData;
 struct ThumbnailData;
-struct SlicingParameters;
-enum LayerHeightEditActionType : unsigned int;
+class ModelObject;
+class ModelInstance;
+class PrintObject;
+class Print;
+class SLAPrint;
+namespace CustomGCode { struct Item; }
 
 namespace GUI {
 
