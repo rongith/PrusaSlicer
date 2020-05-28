@@ -2500,8 +2500,17 @@ bool FillRectilinear2::fill_surface_by_lines(const Surface *surface, const FillP
 
     // define flow spacing according to requested density
     if (params.full_infill() && !params.dont_adjust) {
-        line_spacing = this->_adjust_solid_spacing(bounding_box.size()(0), line_spacing);
+        line_spacing = (surface->surface_type != stBottomBridge) ?
+            this->_adjust_solid_spacing(bounding_box.size()(0), line_spacing) :
+            this->_adjust_bridging_spacing(bounding_box.size()(0), line_spacing);
         this->spacing = unscale<double>(line_spacing);
+        // adjust polygons outer and inner according to the new spacing
+        ExPolygonWithOffset poly_with_offset_new(
+            surface->expolygon,
+            -rotate_vector.first,
+            float(scale_(this->overlap - (0.5 - INFILL_OVERLAP_OVER_SPACING) * this->spacing)),
+            float(scale_(this->overlap - 0.5 * this->spacing)));
+        poly_with_offset = poly_with_offset_new;
     } else {
         // extend bounding box so that our pattern will be aligned with other layers
         // Transform the reference point to the rotated coordinate system.

@@ -105,6 +105,15 @@ coord_t Fill::_adjust_solid_spacing(const coord_t width, const coord_t distance)
     return distance_new;
 }
 
+coord_t Fill::_adjust_bridging_spacing(const coord_t width, const coord_t distance)
+{
+    assert(width >= 0);
+    assert(distance > 0);
+    coord_t number_of_intervals = ((width - SCALED_EPSILON) / distance) + 1;
+    coord_t distance_new = (width - SCALED_EPSILON) / number_of_intervals;
+    return distance_new;
+}
+
 // Returns orientation of the infill and the reference point of the infill pattern.
 // For a normal print, the reference point is the center of a bounding box of the STL.
 std::pair<float, Point> Fill::_infill_direction(const Surface *surface) const
