@@ -13,6 +13,8 @@
 #include "PreviewData.hpp"
 #include "GCodeTimeEstimator.hpp"
 
+#if !ENABLE_GCODE_VIEWER
+
 static const std::string AXIS_STR = "XYZE";
 static const float MMMIN_TO_MMSEC = 1.0f / 60.0f;
 static const float INCHES_TO_MM = 25.4f;
@@ -358,7 +360,7 @@ void GCodeAnalyzer::_processG1(const GCodeReader::GCodeLine& line)
     if (delta_pos[E] < 0.0f)
     {
         if ((delta_pos[X] != 0.0f) || (delta_pos[Y] != 0.0f) || (delta_pos[Z] != 0.0f))
-        type = GCodeMove::Move;
+            type = GCodeMove::Move;
         else
             type = GCodeMove::Retract;
     }
@@ -659,7 +661,7 @@ bool GCodeAnalyzer::_process_tags(const GCodeReader::GCodeLine& line)
         return true;
     }
 
-    // color change tag
+    // pause print tag
     pos = comment.find(Pause_Print_Tag);
     if (pos != comment.npos)
     {
@@ -667,7 +669,7 @@ bool GCodeAnalyzer::_process_tags(const GCodeReader::GCodeLine& line)
         return true;
     }
 
-    // color change tag
+    // custom code tag
     pos = comment.find(Custom_Code_Tag);
     if (pos != comment.npos)
     {
@@ -675,7 +677,7 @@ bool GCodeAnalyzer::_process_tags(const GCodeReader::GCodeLine& line)
         return true;
     }
 
-    // color change tag
+    // end pause print or custom code tag
     pos = comment.find(End_Pause_Print_Or_Custom_Code_Tag);
     if (pos != comment.npos)
     {
@@ -1224,3 +1226,5 @@ size_t GCodeAnalyzer::memory_used() const
 }
 
 } // namespace Slic3r
+
+#endif // !ENABLE_GCODE_VIEWER

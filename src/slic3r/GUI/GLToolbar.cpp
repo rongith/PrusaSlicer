@@ -230,22 +230,11 @@ void GLToolbar::set_icons_size(float size)
 
 void GLToolbar::set_scale(float scale)
 {
-    if (m_layout.scale != scale)
-    {
+    if (m_layout.scale != scale) {
         m_layout.scale = scale;
         m_layout.dirty = true;
         m_icons_texture_dirty = true;
     }
-}
-
-bool GLToolbar::is_enabled() const
-{
-    return m_enabled;
-}
-
-void GLToolbar::set_enabled(bool enable)
-{
-    m_enabled = enable;//true; etFIXME
 }
 
 bool GLToolbar::add_item(const GLToolbarItem::Data& data)
@@ -1238,7 +1227,7 @@ bool GLToolbar::generate_icons_texture() const
     }
 
     std::vector<std::pair<int, bool>> states;
-    if (m_name == "Top")
+    if (m_type == Normal)
     {
         states.push_back({ 1, false }); // Normal
         states.push_back({ 0, false }); // Pressed
@@ -1247,7 +1236,7 @@ bool GLToolbar::generate_icons_texture() const
         states.push_back({ 0, false }); // HoverPressed
         states.push_back({ 2, false }); // HoverDisabled
     }
-    else if (m_name == "View")
+    else
     {
         states.push_back({ 1, false }); // Normal
         states.push_back({ 1, true });  // Pressed

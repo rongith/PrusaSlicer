@@ -8,6 +8,8 @@
 #include "slic3r/GUI/Camera.hpp"
 #include "slic3r/GUI/Plater.hpp"
 
+#include "libslic3r/PresetBundle.hpp"
+
 #include <GL/glew.h>
 
 namespace Slic3r {
@@ -170,7 +172,8 @@ void InstancesHider::show_supports(bool show) {
 void HollowedMesh::on_update()
 {
     const ModelObject* mo = get_pool()->selection_info()->model_object();
-    if (! mo)
+    bool is_sla = wxGetApp().preset_bundle->printers.get_selected_preset().printer_technology() == ptSLA;
+    if (! mo || ! is_sla)
         return;
 
     const GLCanvas3D* canvas = get_pool()->get_canvas();
@@ -376,7 +379,8 @@ void ObjectClipper::set_position(double pos, bool keep_normal)
 void SupportsClipper::on_update()
 {
     const ModelObject* mo = get_pool()->selection_info()->model_object();
-    if (! mo)
+    bool is_sla = wxGetApp().preset_bundle->printers.get_selected_preset().printer_technology() == ptSLA;
+    if (! mo || ! is_sla)
         return;
 
     const GLCanvas3D* canvas = get_pool()->get_canvas();
@@ -444,6 +448,7 @@ void SupportsClipper::render_cut() const
 
     // Get transformation of supports
     Geometry::Transformation supports_trafo = trafo;
+    supports_trafo.set_scaling_factor(Vec3d::Ones());
     supports_trafo.set_offset(Vec3d(trafo.get_offset()(0), trafo.get_offset()(1), sel_info->get_sla_shift()));
     supports_trafo.set_rotation(Vec3d(0., 0., trafo.get_rotation()(2)));
     // I don't know why, but following seems to be correct.

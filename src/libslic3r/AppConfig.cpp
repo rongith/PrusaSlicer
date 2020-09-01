@@ -15,8 +15,8 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/format/format_fwd.hpp>
 
-#include <wx/string.h>
-#include "I18N.hpp"
+//#include <wx/string.h>
+//#include "I18N.hpp"
 
 namespace Slic3r {
 
@@ -98,6 +98,9 @@ void AppConfig::set_defaults()
         set("use_environment_map", "0");
 #endif // ENABLE_ENVIRONMENT_MAP
 
+    if (get("use_inches").empty())
+        set("use_inches", "0");
+
     // Remove legacy window positions/sizes
     erase("", "main_frame_maximized");
     erase("", "main_frame_pos");
@@ -107,7 +110,7 @@ void AppConfig::set_defaults()
     erase("", "object_settings_size");
 }
 
-void AppConfig::load()
+std::string AppConfig::load()
 {
     // 1) Read the complete config file into a boost::property_tree.
     namespace pt = boost::property_tree;
@@ -117,10 +120,15 @@ void AppConfig::load()
         pt::read_ini(ifs, tree);
     } catch (pt::ptree_error& ex) {
         // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
+        // ! But to avoid the use of _utf8 (related to use of wxWidgets) 
+        // we will rethrow this exception from the place of load() call, if returned value wouldn't be empty
+        /*
         throw std::runtime_error(
         	_utf8(L("Error parsing PrusaSlicer config file, it is probably corrupted. "
                     "Try to manually delete the file to recover from the error. Your user profiles will not be affected.")) + 
         	"\n\n" + AppConfig::config_path() + "\n\n" + ex.what());
+        */
+        return ex.what();
     }
 
     // 2) Parse the property_tree, extract the sections and key / value pairs.
@@ -166,6 +174,7 @@ void AppConfig::load()
     // Override missing or keys with their defaults.
     this->set_defaults();
     m_dirty = false;
+    return "";
 }
 
 void AppConfig::save()

@@ -5,6 +5,7 @@
 
 // this needs to be included early for MSVC (listing it in Build.PL is not enough)
 #include <memory>
+#include <array>
 #include <algorithm>
 #include <ostream>
 #include <iostream>
@@ -26,7 +27,7 @@
 // Saves around 32% RAM after slicing step, 6.7% after G-code export (tested on PrusaSlicer 2.2.0 final).
 using coord_t = int32_t;
 #else
-//FIXME At least FillRectilinear2 requires coord_t to be 32bit.
+//FIXME At least FillRectilinear2 and std::boost Voronoi require coord_t to be 32bit.
 typedef int64_t coord_t;
 #endif
 
@@ -72,13 +73,6 @@ inline std::string debug_out_path(const char *name, ...)
 	va_end(args);
 	return std::string(SLIC3R_DEBUG_OUT_PATH_PREFIX) + std::string(buffer);
 }
-
-#ifdef _MSC_VER
-	// Visual Studio older than 2015 does not support the prinf type specifier %zu. Use %Iu instead.
-	#define PRINTF_ZU "%Iu"
-#else
-	#define PRINTF_ZU "%zu"
-#endif
 
 #ifndef UNUSED
 #define UNUSED(x) (void)(x)
@@ -266,6 +260,20 @@ using IntegerOnly = std::enable_if_t<std::is_integral<T>::value, O>;
 
 template<class T, class O = T>
 using ArithmeticOnly = std::enable_if_t<std::is_arithmetic<T>::value, O>;
+
+template<class T, class O = T>
+using IteratorOnly = std::enable_if_t<
+    !std::is_same_v<typename std::iterator_traits<T>::value_type, void>, O
+>;
+
+template<class T, class I, class... Args> // Arbitrary allocator can be used
+IntegerOnly<I, std::vector<T, Args...>> reserve_vector(I capacity)
+{
+    std::vector<T, Args...> ret;
+    if (capacity > I(0)) ret.reserve(size_t(capacity));
+
+    return ret;
+}
 
 } // namespace Slic3r
 

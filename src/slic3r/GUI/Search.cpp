@@ -9,10 +9,10 @@
 #include "wx/dataview.h"
 
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/PresetBundle.hpp"
 #include "GUI_App.hpp"
 #include "Plater.hpp"
 #include "Tab.hpp"
-#include "PresetBundle.hpp"
 
 #define FTS_FUZZY_MATCH_IMPLEMENTATION
 #include "fts_fuzzy_match.h"
@@ -33,20 +33,6 @@ namespace Search {
 #if wxUSE_MARKUP && wxCHECK_VERSION(3, 1, 1)
     #define SEARCH_SUPPORTS_MARKUP
 #endif
-
-static const std::vector<std::wstring>& NameByType()
-{
-    static std::vector<std::wstring> data;
-    if (data.empty()) {
-        data.assign(Preset::TYPE_COUNT, std::wstring());
-        data[Preset::TYPE_PRINT         ] = _L("Print"      ).ToStdWstring();
-        data[Preset::TYPE_FILAMENT      ] = _L("Filament"   ).ToStdWstring();
-        data[Preset::TYPE_SLA_MATERIAL  ] = _L("Material"   ).ToStdWstring();
-        data[Preset::TYPE_SLA_PRINT     ] = _L("Print"      ).ToStdWstring();
-        data[Preset::TYPE_PRINTER       ] = _L("Printer"    ).ToStdWstring();
-	};
-	return data;
-}
 
 static char marker_by_type(Preset::Type type, PrinterTechnology pt)
 {
@@ -631,8 +617,9 @@ void SearchDialog::update_list()
     for (const FoundOption& item : filters)
         search_list_model->Prepend(item.label);
 
-    // select first item 
-    search_list->Select(search_list_model->GetItem(0));
+    // select first item, if search_list
+    if (search_list_model->GetCount() > 0)
+        search_list->Select(search_list_model->GetItem(0));
     prevent_list_events = false;
 }
 

@@ -245,7 +245,6 @@ bool Print::invalidate_step(PrintStep step)
 {
 	bool invalidated = Inherited::invalidate_step(step);
     // Propagate to dependent steps.
-    //FIXME Why should skirt invalidate brim? Shouldn't it be vice versa?
     if (step == psSkirt)
 		invalidated |= Inherited::invalidate_step(psBrim);
     if (step != psGCodeExport)
@@ -501,12 +500,12 @@ static bool custom_per_printz_gcodes_tool_changes_differ(const std::vector<Custo
 	auto it_a = va.begin();
 	auto it_b = vb.begin();
 	while (it_a != va.end() || it_b != vb.end()) {
-		if (it_a != va.end() && it_a->gcode != ToolChangeCode) {
+		if (it_a != va.end() && it_a->type != CustomGCode::ToolChange) {
 			// Skip any CustomGCode items, which are not tool changes.
 			++ it_a;
 			continue;
 		}
-		if (it_b != vb.end() && it_b->gcode != ToolChangeCode) {
+		if (it_b != vb.end() && it_b->type != CustomGCode::ToolChange) {
 			// Skip any CustomGCode items, which are not tool changes.
 			++ it_b;
 			continue;
@@ -514,8 +513,8 @@ static bool custom_per_printz_gcodes_tool_changes_differ(const std::vector<Custo
 		if (it_a == va.end() || it_b == vb.end())
 			// va or vb contains more Tool Changes than the other.
 			return true;
-		assert(it_a->gcode == ToolChangeCode);
-		assert(it_b->gcode == ToolChangeCode);
+		assert(it_a->type == CustomGCode::ToolChange);
+		assert(it_b->type == CustomGCode::ToolChange);
 		if (*it_a != *it_b)
 			// The two Tool Changes differ.
 			return true;
@@ -1607,6 +1606,8 @@ void Print::process()
     }
     if (this->set_started(psSkirt)) {
         m_skirt.clear();
+        m_skirt_convex_hull.clear();
+        m_first_layer_convex_hull.points.clear();
         if (this->has_skirt()) {
             this->set_status(88, L("Generating skirt"));
             this->_make_skirt();
@@ -1615,11 +1616,15 @@ void Print::process()
     }
 	if (this->set_started(psBrim)) {
         m_brim.clear();
+        m_first_layer_convex_hull.points.clear();
         if (m_config.brim_width > 0) {
             this->set_status(88, L("Generating brim"));
             this->_make_brim();
         }
-       this->set_done(psBrim);
+        // Brim depends on skirt (brim lines are trimmed by the skirt lines), therefore if
+        // the skirt gets invalidated, brim gets invalidated as well and the following line is called.
+        this->finalize_first_layer_convex_hull();
+        this->set_done(psBrim);
     }
     BOOST_LOG_TRIVIAL(info) << "Slicing process finished." << log_memory_info();
 }
@@ -1628,13 +1633,21 @@ void Print::process()
 // The export_gcode may die for various reasons (fails to process output_filename_format,
 // write error into the G-code, cannot execute post-processing scripts).
 // It is up to the caller to show an error message.
+#if ENABLE_GCODE_VIEWER
+std::string Print::export_gcode(const std::string& path_template, GCodeProcessor::Result* result, ThumbnailsGeneratorCallback thumbnail_cb)
+#else
 std::string Print::export_gcode(const std::string& path_template, GCodePreviewData* preview_data, ThumbnailsGeneratorCallback thumbnail_cb)
+#endif // ENABLE_GCODE_VIEWER
 {
     // output everything to a G-code file
     // The following call may die if the output_filename_format template substitution fails.
     std::string path = this->output_filepath(path_template);
     std::string message;
+#if ENABLE_GCODE_VIEWER
+    if (!path.empty() && result == nullptr) {
+#else
     if (! path.empty() && preview_data == nullptr) {
+#endif // ENABLE_GCODE_VIEWER
         // Only show the path if preview_data is not set -> running from command line.
         message = L("Exporting G-code");
         message += " to ";
@@ -1645,7 +1658,11 @@ std::string Print::export_gcode(const std::string& path_template, GCodePreviewDa
 
     // The following line may die for multiple reasons.
     GCode gcode;
+#if ENABLE_GCODE_VIEWER
+    gcode.do_export(this, path.c_str(), result, thumbnail_cb);
+#else
     gcode.do_export(this, path.c_str(), preview_data, thumbnail_cb);
+#endif // ENABLE_GCODE_VIEWER
     return path.c_str();
 }
 
@@ -1698,22 +1715,7 @@ void Print::_make_skirt()
     }
 
     // Include the wipe tower.
-    if (has_wipe_tower() && ! m_wipe_tower_data.tool_changes.empty()) {
-        double width = m_config.wipe_tower_width + 2*m_wipe_tower_data.brim_width;
-        double depth = m_wipe_tower_data.depth + 2*m_wipe_tower_data.brim_width;
-        Vec2d pt = Vec2d(-m_wipe_tower_data.brim_width, -m_wipe_tower_data.brim_width);
-
-        std::vector<Vec2d> pts;
-        pts.push_back(Vec2d(pt.x(), pt.y()));
-        pts.push_back(Vec2d(pt.x()+width, pt.y()));
-        pts.push_back(Vec2d(pt.x()+width, pt.y()+depth));
-        pts.push_back(Vec2d(pt.x(), pt.y()+depth));
-        for (Vec2d& pt : pts) {
-            pt = Eigen::Rotation2Dd(Geometry::deg2rad(m_config.wipe_tower_rotation_angle.value)) * pt;
-            pt += Vec2d(m_config.wipe_tower_x.value, m_config.wipe_tower_y.value);
-            points.push_back(Point(scale_(pt.x()), scale_(pt.y())));
-        }
-    }
+    append(points, this->first_layer_wipe_tower_corners());
 
     if (points.size() < 3)
         // At least three points required for a convex hull.
@@ -1797,28 +1799,19 @@ void Print::_make_skirt()
     }
     // Brims were generated inside out, reverse to print the outmost contour first.
     m_skirt.reverse();
+
+    // Remember the outer edge of the last skirt line extruded as m_skirt_convex_hull.
+    for (Polygon &poly : offset(convex_hull, distance + 0.5f * float(scale_(spacing)), ClipperLib::jtRound, float(scale_(0.1))))
+        append(m_skirt_convex_hull, std::move(poly.points));
 }
 
 void Print::_make_brim()
 {
     // Brim is only printed on first layer and uses perimeter extruder.
+    Polygons    islands = this->first_layer_islands();
+    Polygons    loops;
     Flow        flow = this->brim_flow();
-    Polygons    islands;
-    for (PrintObject *object : m_objects) {
-        Polygons object_islands;
-        for (ExPolygon &expoly : object->m_layers.front()->lslices)
-            object_islands.push_back(expoly.contour);
-        if (! object->support_layers().empty())
-            object->support_layers().front()->support_fills.polygons_covered_by_spacing(object_islands, float(SCALED_EPSILON));
-        islands.reserve(islands.size() + object_islands.size() * object->instances().size());
-        for (const PrintInstance &instance : object->instances())
-            for (Polygon &poly : object_islands) {
-                islands.push_back(poly);
-                islands.back().translate(instance.shift);
-            }
-    }
-    Polygons loops;
-    size_t num_loops = size_t(floor(m_config.brim_width.value / flow.spacing()));
+    size_t      num_loops = size_t(floor(m_config.brim_width.value / flow.spacing()));
     for (size_t i = 0; i < num_loops; ++ i) {
         this->throw_if_canceled();
         islands = offset(islands, float(flow.scaled_spacing()), jtSquare);
@@ -1828,6 +1821,11 @@ void Print::_make_brim()
             Points p = MultiPoint::_douglas_peucker(poly.points, SCALED_RESOLUTION);
             p.pop_back();
             poly.points = std::move(p);
+        }
+        if (i + 1 == num_loops) {
+            // Remember the outer edge of the last brim line extruded as m_first_layer_convex_hull.
+            for (Polygon &poly : islands)
+                append(m_first_layer_convex_hull.points, poly.points);
         }
         polygons_append(loops, offset(islands, -0.5f * float(flow.scaled_spacing())));
     }
@@ -1968,6 +1966,58 @@ void Print::_make_brim()
     }
 }
 
+Polygons Print::first_layer_islands() const
+{
+    Polygons islands;
+    for (PrintObject *object : m_objects) {
+        Polygons object_islands;
+        for (ExPolygon &expoly : object->m_layers.front()->lslices)
+            object_islands.push_back(expoly.contour);
+        if (! object->support_layers().empty())
+            object->support_layers().front()->support_fills.polygons_covered_by_spacing(object_islands, float(SCALED_EPSILON));
+        islands.reserve(islands.size() + object_islands.size() * object->instances().size());
+        for (const PrintInstance &instance : object->instances())
+            for (Polygon &poly : object_islands) {
+                islands.push_back(poly);
+                islands.back().translate(instance.shift);
+            }
+    }
+    return islands;
+}
+
+std::vector<Point> Print::first_layer_wipe_tower_corners() const
+{
+    std::vector<Point> corners;
+    if (has_wipe_tower() && ! m_wipe_tower_data.tool_changes.empty()) {
+        double width = m_config.wipe_tower_width + 2*m_wipe_tower_data.brim_width;
+        double depth = m_wipe_tower_data.depth + 2*m_wipe_tower_data.brim_width;
+        Vec2d pt0(-m_wipe_tower_data.brim_width, -m_wipe_tower_data.brim_width);
+        for (Vec2d pt : {
+                pt0,
+                Vec2d(pt0.x()+width, pt0.y()      ),
+                Vec2d(pt0.x()+width, pt0.y()+depth),
+                Vec2d(pt0.x(),       pt0.y()+depth)
+            }) {
+            pt = Eigen::Rotation2Dd(Geometry::deg2rad(m_config.wipe_tower_rotation_angle.value)) * pt;
+            pt += Vec2d(m_config.wipe_tower_x.value, m_config.wipe_tower_y.value);
+            corners.emplace_back(Point(scale_(pt.x()), scale_(pt.y())));
+        }
+    }
+    return corners;
+}
+
+void Print::finalize_first_layer_convex_hull()
+{
+    append(m_first_layer_convex_hull.points, m_skirt_convex_hull);
+    if (m_first_layer_convex_hull.empty()) {
+        // Neither skirt nor brim was extruded. Collect points of printed objects from 1st layer.
+        for (Polygon &poly : this->first_layer_islands())
+            append(m_first_layer_convex_hull.points, std::move(poly.points));
+    }
+    append(m_first_layer_convex_hull.points, this->first_layer_wipe_tower_corners());
+    m_first_layer_convex_hull = Geometry::convex_hull(m_first_layer_convex_hull.points);
+}
+
 // Wipe tower support.
 bool Print::has_wipe_tower() const
 {
@@ -1991,7 +2041,6 @@ const WipeTowerData& Print::wipe_tower_data(size_t extruders_cnt, double first_l
 
     return m_wipe_tower_data;
 }
-
 
 void Print::_make_wipe_tower()
 {
@@ -2144,16 +2193,16 @@ DynamicConfig PrintStatistics::config() const
     DynamicConfig config;
     std::string normal_print_time = short_time(this->estimated_normal_print_time);
     std::string silent_print_time = short_time(this->estimated_silent_print_time);
-    config.set_key_value("print_time",                new ConfigOptionString(normal_print_time));
-    config.set_key_value("normal_print_time",         new ConfigOptionString(normal_print_time));
-    config.set_key_value("silent_print_time",         new ConfigOptionString(silent_print_time));
-    config.set_key_value("used_filament",             new ConfigOptionFloat (this->total_used_filament / 1000.));
-    config.set_key_value("extruded_volume",           new ConfigOptionFloat (this->total_extruded_volume));
-    config.set_key_value("total_cost",                new ConfigOptionFloat (this->total_cost));
+    config.set_key_value("print_time", new ConfigOptionString(normal_print_time));
+    config.set_key_value("normal_print_time", new ConfigOptionString(normal_print_time));
+    config.set_key_value("silent_print_time", new ConfigOptionString(silent_print_time));
+    config.set_key_value("used_filament",             new ConfigOptionFloat(this->total_used_filament / 1000.));
+    config.set_key_value("extruded_volume",           new ConfigOptionFloat(this->total_extruded_volume));
+    config.set_key_value("total_cost",                new ConfigOptionFloat(this->total_cost));
     config.set_key_value("total_toolchanges",         new ConfigOptionInt(this->total_toolchanges));
-    config.set_key_value("total_weight",              new ConfigOptionFloat (this->total_weight));
-    config.set_key_value("total_wipe_tower_cost",     new ConfigOptionFloat (this->total_wipe_tower_cost));
-    config.set_key_value("total_wipe_tower_filament", new ConfigOptionFloat (this->total_wipe_tower_filament));
+    config.set_key_value("total_weight",              new ConfigOptionFloat(this->total_weight));
+    config.set_key_value("total_wipe_tower_cost",     new ConfigOptionFloat(this->total_wipe_tower_cost));
+    config.set_key_value("total_wipe_tower_filament", new ConfigOptionFloat(this->total_wipe_tower_filament));
     return config;
 }
 

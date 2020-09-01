@@ -28,14 +28,16 @@
 #include <wx/log.h>
 #include <wx/intl.h>
 
+#include <wx/dialog.h>
+#include <wx/textctrl.h>
+
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/I18N.hpp"
+#include "libslic3r/PresetBundle.hpp"
 
 #include "GUI.hpp"
 #include "GUI_Utils.hpp"
-#include "AppConfig.hpp"
-#include "PresetBundle.hpp"
 #include "3DScene.hpp"
 #include "MainFrame.hpp"
 #include "Plater.hpp"
@@ -54,6 +56,7 @@
 #include "Mouse3DController.hpp"
 #include "RemovableDriveManager.hpp"
 #include "InstanceCheck.hpp"
+#include "NotificationManager.hpp"
 
 #ifdef __WXMSW__
 #include <dbt.h>
@@ -106,6 +109,7 @@ wxString file_wildcards(FileType file_type, const std::string &custom_extension)
 static std::string libslic3r_translate_callback(const char *s) { return wxGetTranslation(wxString(s, wxConvUTF8)).utf8_str().data(); }
 
 #ifdef WIN32
+#if !wxVERSION_EQUAL_OR_GREATER_THAN(3,1,3)
 static void register_win32_dpi_event()
 {
     enum { WM_DPICHANGED_ = 0x02e0 };
@@ -121,13 +125,12 @@ static void register_win32_dpi_event()
         return true;
     });
 }
+#endif // !wxVERSION_EQUAL_OR_GREATER_THAN
 
 static GUID GUID_DEVINTERFACE_HID = { 0x4D1E55B2, 0xF16F, 0x11CF, 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 };
 
 static void register_win32_device_notification_event()
 {
-    enum { WM_DPICHANGED_ = 0x02e0 };
-
     wxWindow::MSWRegisterMessageHandler(WM_DEVICECHANGE, [](wxWindow *win, WXUINT /* nMsg */, WXWPARAM wParam, WXLPARAM lParam) {
         // Some messages are sent to top level windows by default, some messages are sent to only registered windows, and we explictely register on MainFrame only.
         auto main_frame = dynamic_cast<MainFrame*>(win);
@@ -322,7 +325,13 @@ void GUI_App::init_app_config()
 	// load settings
 	app_conf_exists = app_config->exists();
 	if (app_conf_exists) {
-		app_config->load();
+        std::string error = app_config->load();
+        if (!error.empty())
+            // Error while parsing config file. We'll customize the error message and rethrow to be displayed.
+            throw std::runtime_error(
+                _u8L("Error parsing PrusaSlicer config file, it is probably corrupted. "
+                    "Try to manually delete the file to recover from the error. Your user profiles will not be affected.") +
+                "\n\n" + AppConfig::config_path() + "\n\n" + error);
 	}
 }
 
@@ -384,7 +393,7 @@ bool GUI_App::on_init_inner()
     // supplied as argument to --datadir; in that case we should still run the wizard
     preset_bundle->setup_directories();
 
-#ifdef __WXMSW__
+#ifdef __WXMSW__ 
     associate_3mf_files();
 #endif // __WXMSW__
 
@@ -392,6 +401,11 @@ bool GUI_App::on_init_inner()
     Bind(EVT_SLIC3R_VERSION_ONLINE, [this](const wxCommandEvent &evt) {
         app_config->set("version_online", into_u8(evt.GetString()));
         app_config->save();
+		if(this->plater_ != nullptr) {
+			if (*Semver::parse(SLIC3R_VERSION) < * Semver::parse(into_u8(evt.GetString()))) {
+				this->plater_->get_notification_manager()->push_notification(NotificationType::NewAppAviable, *(this->plater_->get_current_canvas3D()));
+			}
+		}
     });
 
     // initialize label colors and fonts
@@ -410,7 +424,9 @@ bool GUI_App::on_init_inner()
     }
 
 #ifdef WIN32
+#if !wxVERSION_EQUAL_OR_GREATER_THAN(3,1,3)
     register_win32_dpi_event();
+#endif // !wxVERSION_EQUAL_OR_GREATER_THAN
     register_win32_device_notification_event();
 #endif // WIN32
 
@@ -627,13 +643,34 @@ void GUI_App::set_auto_toolbar_icon_scale(float scale) const
     app_config->set("auto_toolbar_size", val);
 }
 
+// check user printer_presets for the containing information about "Print Host upload"
+void GUI_App::check_printer_presets()
+{
+    std::vector<std::string> preset_names = PhysicalPrinter::presets_with_print_host_information(preset_bundle->printers);
+    if (preset_names.empty())
+        return;
+
+    wxString msg_text =  _L("You have next presets with saved options for \"Print Host upload\"") + ":";
+    for (const std::string& preset_name : preset_names)
+        msg_text += "\n    \"" + from_u8(preset_name) + "\",";
+    msg_text.RemoveLast();
+    msg_text += "\n\n" + _L("But from this version of PrusaSlicer we don't show/use this information in Printer Settings.\n"
+                            "Now, this information will be exposed in physical printers settings.") + "\n\n" +
+                         _L("By default new Printer devices will be named as \"Printer N\" during its creation.\n"
+                            "Note: This name can be changed later from the physical printers settings");
+
+    wxMessageDialog(nullptr, msg_text, _L("Information"), wxOK | wxICON_INFORMATION).ShowModal();
+
+    preset_bundle->physical_printers.load_printers_from_presets(preset_bundle->printers);
+}
+
 void GUI_App::recreate_GUI(const wxString& msg_name)
 {
     mainframe->shutdown();
 
-    wxProgressDialog dlg(msg_name, msg_name);
+    wxProgressDialog dlg(msg_name, msg_name, 100, nullptr, wxPD_AUTO_HIDE);
     dlg.Pulse();
-    dlg.Update(10, _(L("Recreating")) + dots);
+    dlg.Update(10, _L("Recreating") + dots);
 
     MainFrame *old_main_frame = mainframe;
     mainframe = new MainFrame();
@@ -643,17 +680,17 @@ void GUI_App::recreate_GUI(const wxString& msg_name)
     sidebar().obj_list()->init_objects();
     SetTopWindow(mainframe);
 
-    dlg.Update(30, _(L("Recreating")) + dots);
+    dlg.Update(30, _L("Recreating") + dots);
     old_main_frame->Destroy();
     // For this moment ConfigWizard is deleted, invalidate it.
     m_wizard = nullptr;
 
-    dlg.Update(80, _(L("Loading of current presets")) + dots);
+    dlg.Update(80, _L("Loading of current presets") + dots);
     m_printhost_job_queue.reset(new PrintHostJobQueue(mainframe->printhost_queue_dlg()));
     load_current_presets();
     mainframe->Show(true);
 
-    dlg.Update(90, _(L("Loading of a mode view")) + dots);
+    dlg.Update(90, _L("Loading of a mode view") + dots);
     /* Temporary workaround for the correct behavior of the Scrolled sidebar panel:
     * change min hight of object list to the normal min value (15 * wxGetApp().em_unit())
     * after first whole Mainframe updating/layouting
@@ -715,24 +752,16 @@ void GUI_App::update_ui_from_settings()
 void GUI_App::persist_window_geometry(wxTopLevelWindow *window, bool default_maximized)
 {
     const std::string name = into_u8(window->GetName());
-    wxTopLevelWindow* settings_dlg = dynamic_cast<MainFrame*>(window)->m_settings_dialog;
-    const std::string settings_dlg_name = "settings_dialog";
 
     window->Bind(wxEVT_CLOSE_WINDOW, [=](wxCloseEvent &event) {
         window_pos_save(window, name);
-        if (settings_dlg)
-            window_pos_save(settings_dlg, settings_dlg_name);
         event.Skip();
     });
 
     window_pos_restore(window, name, default_maximized);
-    if (settings_dlg)
-        window_pos_restore(settings_dlg, settings_dlg_name, default_maximized);
 
     on_window_geometry(window, [=]() {
         window_pos_sanitize(window);
-        if (settings_dlg)
-            window_pos_sanitize(settings_dlg);
     });
 }
 
@@ -759,6 +788,20 @@ void GUI_App::import_model(wxWindow *parent, wxArrayString& input_files) const
     if (dialog.ShowModal() == wxID_OK)
         dialog.GetPaths(input_files);
 }
+
+#if ENABLE_GCODE_VIEWER
+void GUI_App::load_gcode(wxWindow* parent, wxString& input_file) const
+{
+    input_file.Clear();
+    wxFileDialog dialog(parent ? parent : GetTopWindow(),
+        _(L("Choose one file (GCODE/.GCO/.G/.ngc/NGC):")),
+        app_config->get_last_dir(), "",
+        file_wildcards(FT_GCODE), wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+
+    if (dialog.ShowModal() == wxID_OK)
+        input_file = dialog.GetPath();
+}
+#endif // ENABLE_GCODE_VIEWER
 
 bool GUI_App::switch_language()
 {
@@ -943,7 +986,7 @@ bool GUI_App::load_language(wxString language, bool initial)
     m_imgui->set_language(into_u8(language_info->CanonicalName));
     //FIXME This is a temporary workaround, the correct solution is to switch to "C" locale during file import / export only.
     wxSetlocale(LC_NUMERIC, "C");
-    Preset::update_suffix_modified();
+    Preset::update_suffix_modified((" (" + _L("modified") + ")").ToUTF8().data());
 	return true;
 }
 
@@ -1067,17 +1110,21 @@ void GUI_App::add_config_menu(wxMenuBar *menu)
             break;
         case ConfigMenuPreferences:
         {
-            bool recreate_app = false;
+            bool app_layout_changed = false;
             {
                 // the dialog needs to be destroyed before the call to recreate_GUI()
                 // or sometimes the application crashes into wxDialogBase() destructor
                 // so we put it into an inner scope
                 PreferencesDialog dlg(mainframe);
                 dlg.ShowModal();
-                recreate_app = dlg.settings_layout_changed();
+                app_layout_changed = dlg.settings_layout_changed();
             }
-            if (recreate_app)
-                recreate_GUI(_L("Changing of the settings layout") + dots);
+            if (app_layout_changed) {
+                mainframe->GetSizer()->Hide((size_t)0);
+                mainframe->update_layout();
+                mainframe->select_tab(0);
+                mainframe->GetSizer()->Show((size_t)0);
+            }
             break;
         }
         case ConfigMenuLanguage:
@@ -1160,6 +1207,10 @@ bool GUI_App::checked_tab(Tab* tab)
 // Update UI / Tabs to reflect changes in the currently loaded presets
 void GUI_App::load_current_presets()
 {
+    // check printer_presets for the containing information about "Print Host upload"
+    // and create physical printer from it, if any exists
+    check_printer_presets();
+
     PrinterTechnology printer_technology = preset_bundle->printers.get_edited_preset().printer_technology();
 	this->plater()->set_printer_technology(printer_technology);
     for (Tab *tab : tabs_list)
@@ -1394,7 +1445,9 @@ void GUI_App::window_pos_restore(wxTopLevelWindow* window, const std::string &na
         return;
     }
 
-    window->SetSize(metrics->get_rect());
+    const wxRect& rect = metrics->get_rect();
+    window->SetPosition(rect.GetPosition());
+    window->SetSize(rect.GetSize());
     window->Maximize(metrics->get_maximized());
 }
 
@@ -1439,7 +1492,7 @@ void GUI_App::check_updates(const bool verbose)
 	
 	PresetUpdater::UpdateResult updater_result;
 	try {
-		updater_result = preset_updater->config_update(app_config->orig_version());
+		updater_result = preset_updater->config_update(app_config->orig_version(), verbose);
 		if (updater_result == PresetUpdater::R_INCOMPAT_EXIT) {
 			mainframe->Close();
 		}

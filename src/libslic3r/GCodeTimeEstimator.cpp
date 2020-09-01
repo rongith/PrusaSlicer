@@ -9,6 +9,8 @@
 #include <boost/nowide/cstdio.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 
+#if !ENABLE_GCODE_VIEWER
+
 static const float MMMIN_TO_MMSEC = 1.0f / 60.0f;
 static const float MILLISEC_TO_SEC = 0.001f;
 static const float INCHES_TO_MM = 25.4f;
@@ -188,7 +190,7 @@ namespace Slic3r {
         _calculate_time(0);
 
         if (m_needs_custom_gcode_times && (m_custom_gcode_time_cache != 0.0f))
-            m_custom_gcode_times.push_back({ cgtColorChange, m_custom_gcode_time_cache });
+            m_custom_gcode_times.push_back({CustomGCode::ColorChange, m_custom_gcode_time_cache });
 
 #if ENABLE_MOVE_STATS
         _log_moves_stats();
@@ -678,7 +680,7 @@ namespace Slic3r {
         return _get_time_minutes(get_time());
     }
 
-    std::vector<std::pair<CustomGcodeType, float>> GCodeTimeEstimator::get_custom_gcode_times() const
+    std::vector<std::pair<CustomGCode::Type, float>> GCodeTimeEstimator::get_custom_gcode_times() const
     {
         return m_custom_gcode_times;
     }
@@ -722,9 +724,9 @@ namespace Slic3r {
         return ret;
     }
 
-    std::vector<std::pair<CustomGcodeType, std::string>> GCodeTimeEstimator::get_custom_gcode_times_dhm(bool include_remaining) const
+    std::vector<std::pair<CustomGCode::Type, std::string>> GCodeTimeEstimator::get_custom_gcode_times_dhm(bool include_remaining) const
     {
-        std::vector<std::pair<CustomGcodeType, std::string>> ret;
+        std::vector<std::pair<CustomGCode::Type, std::string>> ret;
 
         float total_time = 0.0f;
         for (auto t : m_custom_gcode_times)
@@ -1477,7 +1479,7 @@ namespace Slic3r {
         size_t pos = comment.find(Color_Change_Tag);
         if (pos != comment.npos)
         {
-            _process_custom_gcode_tag(cgtColorChange);
+            _process_custom_gcode_tag(CustomGCode::ColorChange);
             return true;
         }
 
@@ -1485,14 +1487,14 @@ namespace Slic3r {
         pos = comment.find(Pause_Print_Tag);
         if (pos != comment.npos)
         {
-            _process_custom_gcode_tag(cgtPausePrint);
+            _process_custom_gcode_tag(CustomGCode::PausePrint);
             return true;
         }
 
         return false;
     }
 
-    void GCodeTimeEstimator::_process_custom_gcode_tag(CustomGcodeType code)
+    void GCodeTimeEstimator::_process_custom_gcode_tag(CustomGCode::Type code)
     {
         PROFILE_FUNC();
         m_needs_custom_gcode_times = true;
@@ -1713,3 +1715,5 @@ namespace Slic3r {
     }
 #endif // ENABLE_MOVE_STATS
 }
+
+#endif // !ENABLE_GCODE_VIEWER

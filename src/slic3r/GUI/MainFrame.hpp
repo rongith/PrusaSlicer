@@ -7,6 +7,9 @@
 #include <wx/settings.h>
 #include <wx/string.h>
 #include <wx/filehistory.h>
+#if ENABLE_GCODE_VIEWER_TASKBAR_ICON
+#include <wx/taskbar.h>
+#endif // ENABLE_GCODE_VIEWER_TASKBAR_ICON
 
 #include <string>
 #include <map>
@@ -51,11 +54,11 @@ struct PresetTab {
 class SettingsDialog : public DPIDialog
 {
     wxNotebook* m_tabpanel { nullptr };
-    MainFrame*  m_main_frame {nullptr };
+    MainFrame*  m_main_frame { nullptr };
 public:
     SettingsDialog(MainFrame* mainframe);
     ~SettingsDialog() {}
-    wxNotebook* get_tabpanel() { return m_tabpanel; }
+    void set_tabpanel(wxNotebook* tabpanel) { m_tabpanel = tabpanel; }
 
 protected:
     void on_dpi_changed(const wxRect& suggested_rect) override;
@@ -68,10 +71,25 @@ class MainFrame : public DPIFrame
     wxString    m_qs_last_input_file = wxEmptyString;
     wxString    m_qs_last_output_file = wxEmptyString;
     wxString    m_last_config = wxEmptyString;
+#if ENABLE_GCODE_VIEWER
+    wxMenuBar* m_editor_menubar{ nullptr };
+    wxMenuBar* m_gcodeviewer_menubar{ nullptr };
+
+    struct RestoreFromGCodeViewer
+    {
+        bool collapsed_sidebar{ false };
+        bool collapse_toolbar_enabled{ false };
+        bool sla_technology{ false };
+    };
+
+    RestoreFromGCodeViewer m_restore_from_gcode_viewer;
+#endif // ENABLE_GCODE_VIEWER
+
 #if 0
     wxMenuItem* m_menu_item_repeat { nullptr }; // doesn't used now
 #endif
     wxMenuItem* m_menu_item_reslice_now { nullptr };
+    wxSizer*    m_main_sizer{ nullptr };
 
     PrintHostQueueDialog *m_printhost_queue_dlg;
 
@@ -114,11 +132,30 @@ class MainFrame : public DPIFrame
 
     wxFileHistory m_recent_projects;
 
-    enum SettingsLayout {
-        slOld = 0,
-        slNew,
-        slDlg,
-    }               m_layout;
+    enum class ESettingsLayout
+    {
+        Unknown,
+        Old,
+        New,
+        Dlg,
+#if ENABLE_GCODE_VIEWER
+        GCodeViewer
+#endif // ENABLE_GCODE_VIEWER
+    };
+    
+    ESettingsLayout m_layout{ ESettingsLayout::Unknown };
+
+#if ENABLE_GCODE_VIEWER
+public:
+    enum class EMode : unsigned char
+    {
+        Editor,
+        GCodeViewer
+    };
+
+private:
+    EMode m_mode{ EMode::Editor };
+#endif // ENABLE_GCODE_VIEWER
 
 protected:
     virtual void on_dpi_changed(const wxRect &suggested_rect);
@@ -126,7 +163,13 @@ protected:
 
 public:
     MainFrame();
+#if ENABLE_GCODE_VIEWER_TASKBAR_ICON
+    ~MainFrame();
+#else
     ~MainFrame() = default;
+#endif // ENABLE_GCODE_VIEWER_TASKBAR_ICON
+
+    void update_layout();
 
 	// Called when closing the application and when switching the application language.
 	void 		shutdown();
@@ -138,8 +181,17 @@ public:
     void        init_tabpanel();
     void        create_preset_tabs();
     void        add_created_tab(Tab* panel);
+#if ENABLE_GCODE_VIEWER
+    void        init_editor_menubar();
+    void        update_editor_menubar();
+    void        init_gcodeviewer_menubar();
+
+    EMode       get_mode() const { return m_mode; }
+    void        set_mode(EMode mode);
+#else
     void        init_menubar();
     void        update_menubar();
+#endif // ENABLE_GCODE_VIEWER
 
     void        update_ui_from_settings();
     bool        is_loaded() const { return m_loaded; }
@@ -169,9 +221,14 @@ public:
 
     Plater*             m_plater { nullptr };
     wxNotebook*         m_tabpanel { nullptr };
-    SettingsDialog*     m_settings_dialog { nullptr };
+    SettingsDialog      m_settings_dialog;
+    wxWindow*           m_plater_page{ nullptr };
     wxProgressDialog*   m_progress_dialog { nullptr };
     std::shared_ptr<ProgressStatusBar>  m_statusbar;
+
+#if ENABLE_GCODE_VIEWER_TASKBAR_ICON
+    wxTaskBarIcon* m_taskbar_icon{ nullptr };
+#endif // ENABLE_GCODE_VIEWER_TASKBAR_ICON
 
 #ifdef _WIN32
     void*				m_hDeviceNotify { nullptr };

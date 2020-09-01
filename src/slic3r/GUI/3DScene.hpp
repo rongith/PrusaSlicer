@@ -10,28 +10,22 @@
 
 #include <functional>
 
-#ifndef NDEBUG
-#define HAS_GLSAFE
+#if ENABLE_OPENGL_ERROR_LOGGING || ! defined(NDEBUG)
+    #define HAS_GLSAFE
 #endif
 
 #ifdef HAS_GLSAFE
-extern void glAssertRecentCallImpl(const char *file_name, unsigned int line, const char *function_name);
-inline void glAssertRecentCall() { glAssertRecentCallImpl(__FILE__, __LINE__, __FUNCTION__); }
-#define glsafe(cmd) do { cmd; glAssertRecentCallImpl(__FILE__, __LINE__, __FUNCTION__); } while (false)
-#define glcheck() do { glAssertRecentCallImpl(__FILE__, __LINE__, __FUNCTION__); } while (false)
-#else
-inline void glAssertRecentCall() { }
-#define glsafe(cmd) cmd
-#define glcheck()
-#endif
+    extern void glAssertRecentCallImpl(const char *file_name, unsigned int line, const char *function_name);
+    inline void glAssertRecentCall() { glAssertRecentCallImpl(__FILE__, __LINE__, __FUNCTION__); }
+    #define glsafe(cmd) do { cmd; glAssertRecentCallImpl(__FILE__, __LINE__, __FUNCTION__); } while (false)
+    #define glcheck() do { glAssertRecentCallImpl(__FILE__, __LINE__, __FUNCTION__); } while (false)
+#else // HAS_GLSAFE
+    inline void glAssertRecentCall() { }
+    #define glsafe(cmd) cmd
+    #define glcheck()
+#endif // HAS_GLSAFE
 
 namespace Slic3r {
-namespace GUI {
-class Bed3D;
-struct Camera;
-class GLToolbar;
-} // namespace GUI
-
 class SLAPrintObject;
 enum  SLAPrintObjectStep : unsigned int;
 class DynamicPrintConfig;
@@ -125,8 +119,13 @@ public:
     unsigned int       triangle_indices_VBO_id{ 0 };
     unsigned int       quad_indices_VBO_id{ 0 };
 
-    void load_mesh_full_shading(const TriangleMesh &mesh);
+#if ENABLE_SMOOTH_NORMALS
+    void load_mesh_full_shading(const TriangleMesh& mesh, bool smooth_normals = false);
+    void load_mesh(const TriangleMesh& mesh, bool smooth_normals = false) { this->load_mesh_full_shading(mesh, smooth_normals); }
+#else
+    void load_mesh_full_shading(const TriangleMesh& mesh);
     void load_mesh(const TriangleMesh& mesh) { this->load_mesh_full_shading(mesh); }
+#endif // ENABLE_SMOOTH_NORMALS
 
     inline bool has_VBOs() const { return vertices_and_normals_interleaved_VBO_id != 0; }
 
@@ -598,8 +597,10 @@ public:
     std::string         log_memory_info() const;
 
     bool                has_toolpaths_to_export() const;
+#if !ENABLE_GCODE_VIEWER
     // Export the geometry of the GLVolumes toolpaths of this collection into the file with the given path, in obj format 
     void                export_toolpaths_to_obj(const char* filename) const;
+#endif // !ENABLE_GCODE_VIEWER
 
 private:
     GLVolumeCollection(const GLVolumeCollection &other);
@@ -608,6 +609,7 @@ private:
 
 GLVolumeWithIdAndZList volumes_to_render(const GLVolumePtrs& volumes, GLVolumeCollection::ERenderType type, const Transform3d& view_matrix, std::function<bool(const GLVolume&)> filter_func = nullptr);
 
+#if !ENABLE_GCODE_VIEWER
 class GLModel
 {
 protected:
@@ -667,6 +669,7 @@ class GLBed : public GLModel
 protected:
     bool on_init_from_file(const std::string& filename) override;
 };
+#endif // !ENABLE_GCODE_VIEWER
 
 struct _3DScene
 {

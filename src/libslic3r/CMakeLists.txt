@@ -99,6 +99,8 @@ add_library(libslic3r STATIC
     GCode/ToolOrdering.hpp
     GCode/WipeTower.cpp
     GCode/WipeTower.hpp
+    GCode/GCodeProcessor.cpp
+    GCode/GCodeProcessor.hpp
     GCode.cpp
     GCode.hpp
     GCodeReader.cpp
@@ -147,6 +149,12 @@ add_library(libslic3r STATIC
     PolygonTrimmer.hpp
     Polyline.cpp
     Polyline.hpp
+    Preset.cpp
+    Preset.hpp
+    PresetBundle.cpp
+    PresetBundle.hpp
+    AppConfig.cpp
+    AppConfig.hpp
     Print.cpp
     Print.hpp
     PrintBase.cpp
@@ -155,6 +163,8 @@ add_library(libslic3r STATIC
     PrintConfig.hpp
     PrintObject.cpp
     PrintRegion.cpp
+    PNGRead.hpp
+    PNGRead.cpp
     Semver.cpp
     ShortestPath.cpp
     ShortestPath.hpp
@@ -187,7 +197,12 @@ add_library(libslic3r STATIC
     Utils.hpp
     Time.cpp
     Time.hpp
+    TriangleSelector.cpp
+    TriangleSelector.hpp
     MTUtils.hpp
+    VoronoiOffset.cpp
+    VoronoiOffset.hpp
+    VoronoiVisualUtils.hpp
     Zipper.hpp
     Zipper.cpp
     MinAreaBoundingBox.hpp
@@ -198,12 +213,13 @@ add_library(libslic3r STATIC
     SimplifyMeshImpl.hpp
     SimplifyMesh.cpp
     MarchingSquares.hpp
+    Optimizer.hpp
     ${OpenVDBUtils_SOURCES}
-    SLA/Common.hpp
-    SLA/Common.cpp
     SLA/Pad.hpp
     SLA/Pad.cpp
     SLA/SupportTreeBuilder.hpp
+    SLA/SupportTreeMesher.hpp
+    SLA/SupportTreeMesher.cpp
     SLA/SupportTreeBuildsteps.hpp
     SLA/SupportTreeBuildsteps.cpp
     SLA/SupportTreeBuilder.cpp
@@ -215,6 +231,7 @@ add_library(libslic3r STATIC
     SLA/Rotfinder.cpp
     SLA/BoostAdapter.hpp
     SLA/SpatIndex.hpp
+    SLA/SpatIndex.cpp
     SLA/RasterBase.hpp
     SLA/RasterBase.cpp
     SLA/AGGRaster.hpp
@@ -230,8 +247,10 @@ add_library(libslic3r STATIC
     SLA/SupportPointGenerator.cpp
     SLA/Contour3D.hpp
     SLA/Contour3D.cpp
-    SLA/EigenMesh3D.hpp
+    SLA/IndexedMesh.hpp
+    SLA/IndexedMesh.cpp
     SLA/Clustering.hpp
+    SLA/Clustering.cpp
     SLA/ReprojectPointsOnMesh.hpp
 )
 
@@ -293,6 +312,8 @@ target_link_libraries(libslic3r
     TBB::tbb
     libslic3r_cgal
     ${CMAKE_DL_LIBS}
+    PNG::PNG
+    ZLIB::ZLIB
     )
 
 if (TARGET OpenVDB::openvdb)
