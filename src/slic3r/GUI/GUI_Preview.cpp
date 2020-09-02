@@ -274,6 +274,7 @@ bool Preview::init(wxWindow* parent, Model* model)
     m_label_view_type = new wxStaticText(this, wxID_ANY, _L("View"));
 
     m_choice_view_type = new wxChoice(this, wxID_ANY);
+#endif // ENABLE_GCODE_VIEWER
     m_choice_view_type->Append(_(L("Feature type")));
     m_choice_view_type->Append(_(L("Section")));
     m_choice_view_type->Append(_(L("Height")));
