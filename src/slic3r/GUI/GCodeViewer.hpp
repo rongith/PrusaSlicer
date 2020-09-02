@@ -359,13 +359,10 @@ public:
     enum class EViewType : unsigned char
     {
         FeatureType,
-        Mm3_per_mm,
         Height,
         Width,
         Feedrate,
         FanSpeed,
-        LayerTime,
-        LayerTimeLog,
         VolumetricRate,
         Tool,
         ColorPrint,
