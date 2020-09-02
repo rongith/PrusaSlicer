@@ -2451,7 +2451,7 @@ void GCode::process_layer(
         gcode = m_pressure_equalizer->process(gcode.c_str(), false);
     // printf("G-code after filter:\n%s\n", out.c_str());
 #endif /* HAS_PRESSURE_EQUALIZER */
-    
+
     _write(file, gcode);
 #if !ENABLE_GCODE_VIEWER
     BOOST_LOG_TRIVIAL(trace) << "Exported layer " << layer.id() << " print_z " << print_z <<
@@ -2492,7 +2492,6 @@ void GCode::append_full_config(const Print &print, std::string &str)
 void GCode::set_extruders(const std::vector<unsigned int> &extruder_ids)
 {
     m_writer.set_extruders(extruder_ids);
-    
     // enable wipe path generation if any extruder has wipe enabled
     m_wipe.enable = false;
     for (auto id : extruder_ids)
@@ -2517,13 +2516,11 @@ void GCode::set_origin(const Vec2d &pointf)
 std::string GCode::preamble()
 {
     std::string gcode = m_writer.preamble();
-    
     /*  Perform a *silent* move to z_offset: we need this to initialize the Z
         position of our writer object so that any initial lift taking place
         before the first layer change will raise the extruder from the correct
         initial Z instead of 0.  */
     m_writer.travel_to_z(m_config.z_offset.value);
-    
     return gcode;
 }
 
@@ -2543,10 +2540,8 @@ std::string GCode::change_layer(coordf_t print_z)
         comment << "move to next layer (" << m_layer_index << ")";
         gcode += m_writer.travel_to_z(z, comment.str());
     }
-    
     // forget last wiping path as wiping after raising Z is pointless
     m_wipe.reset_path();
-    
     return gcode;
 }
 
@@ -2741,14 +2736,11 @@ std::string GCode::extrude_loop(ExtrusionLoop loop, std::string description, dou
             #endif
         }
     }
-  
     // extrude all loops ccw
     bool was_clockwise = loop.make_counter_clockwise();
-    
     SeamPosition seam_position = m_config.seam_position;
     if (loop.loop_role() == elrSkirt) 
         seam_position = spNearest;
-    
     // find the point of the loop that is closest to the current extruder position
     // or randomize if requested
     Point last_pos = this->last_pos();
@@ -2913,7 +2905,6 @@ std::string GCode::extrude_loop(ExtrusionLoop loop, std::string description, dou
         // Find the closest point, avoid overhangs.
         loop.split_at(last_pos, true);
     }
-    
     // clip the path to avoid the extruder to get exactly on the first point of the loop;
     // if polyline was shorter than the clipping distance we'd get a null polyline, so
     // we discard it in that case
@@ -2925,11 +2916,9 @@ std::string GCode::extrude_loop(ExtrusionLoop loop, std::string description, dou
     ExtrusionPaths paths;
     loop.clip_end(clip_length, &paths);
     if (paths.empty()) return "";
-    
     // apply the small perimeter speed
     if (is_perimeter(paths.front().role()) && loop.length() <= SMALL_PERIMETER_LENGTH && speed == -1)
         speed = m_config.small_perimeter_speed.get_abs_value(m_config.perimeter_speed);
-    
     // extrude along the path
     std::string gcode;
     for (ExtrusionPaths::iterator path = paths.begin(); path != paths.end(); ++path) {
@@ -2938,13 +2927,10 @@ std::string GCode::extrude_loop(ExtrusionLoop loop, std::string description, dou
         path->simplify(SCALED_RESOLUTION);
         gcode += this->_extrude(*path, description, speed);
     }
-    
     // reset acceleration
     gcode += m_writer.set_acceleration((unsigned int)(m_config.default_acceleration.value + 0.5));
-    
     if (m_wipe.enable)
         m_wipe.path = paths.front().polyline;  // TODO: don't limit wipe to last path
-    
     // make a little move inwards before leaving loop
 	if (paths.back().role() == erExternalPerimeter && m_layer != NULL && m_config.perimeters.value > 1 && paths.front().size() >= 2 && paths.back().polyline.points.size() >= 3) {
         // detect angle between last and first segment
@@ -2957,12 +2943,9 @@ std::string GCode::extrude_loop(ExtrusionLoop loop, std::string description, dou
             // swap points
             Point c = a; a = b; b = c;
         }
-        
         double angle = paths.front().first_point().ccw_angle(a, b) / 3;
-        
         // turn left if contour, turn right if hole
         if (was_clockwise) angle *= -1;
-        
         // create the destination point along the first segment and rotate it
         // we make sure we don't exceed the segment length because we don't know
         // the rotation of the second segment so we might cross the object boundary
@@ -2978,7 +2961,6 @@ std::string GCode::extrude_loop(ExtrusionLoop loop, std::string description, dou
         // generate the travel move
         gcode += m_writer.travel_to_xy(this->point_to_gcode(pt), "move inwards before travel");
     }
-    
     return gcode;
 }
 
@@ -3159,10 +3141,8 @@ void GCode::_write_format(FILE* file, const char* format, ...)
 std::string GCode::_extrude(const ExtrusionPath &path, std::string description, double speed)
 {
     std::string gcode;
-    
     if (is_bridge(path.role()))
         description += " (bridge)";
-    
     // go to first point of extrusion path
     if (!m_last_pos_defined || m_last_pos != path.first_point()) {
         gcode += this->travel_to(
@@ -3171,10 +3151,8 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
             "move to first " + description + " point"
         );
     }
-    
     // compensate retraction
     gcode += this->unretract();
-    
     // adjust acceleration
     {
         double acceleration;
@@ -3191,11 +3169,9 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         }
         gcode += m_writer.set_acceleration((unsigned int)floor(acceleration + 0.5));
     }
-    
     // calculate extrusion length per distance unit
     double e_per_mm = m_writer.extruder()->e_per_mm3() * path.mm3_per_mm;
     if (m_writer.extrusion_axis().empty()) e_per_mm = 0;
-    
     // set speed
     if (speed == -1) {
         if (path.role() == erPerimeter) {
@@ -3237,7 +3213,6 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
         );
     }
     double F = speed * 60;  // convert mm/sec to mm/min
-    
     // extrude arc or line
     if (m_enable_extrusion_role_markers)
     {
@@ -3345,40 +3320,34 @@ std::string GCode::_extrude(const ExtrusionPath &path, std::string description, 
     }
     if (m_enable_cooling_markers)
         gcode += is_bridge(path.role()) ? ";_BRIDGE_FAN_END\n" : ";_EXTRUDE_END\n";
-    
     this->set_last_pos(path.last_point());
     return gcode;
 }
 
 // This method accepts &point in print coordinates.
 std::string GCode::travel_to(const Point &point, ExtrusionRole role, std::string comment)
-{    
+{
     /*  Define the travel move as a line between current position and the taget point.
         This is expressed in print coordinates, so it will need to be translated by
         this->origin in order to get G-code coordinates.  */
     Polyline travel;
     travel.append(this->last_pos());
     travel.append(point);
-    
     // check whether a straight travel move would need retraction
     bool needs_retraction = this->needs_retraction(travel, role);
-    
     // if a retraction would be needed, try to use avoid_crossing_perimeters to plan a
     // multi-hop travel path inside the configuration space
     if (needs_retraction
         && m_config.avoid_crossing_perimeters
         && ! m_avoid_crossing_perimeters.disable_once) {
         travel = m_avoid_crossing_perimeters.travel_to(*this, point);
-        
         // check again whether the new travel path still needs a retraction
         needs_retraction = this->needs_retraction(travel, role);
         //if (needs_retraction && m_layer_index > 1) exit(0);
     }
-    
     // Re-allow avoid_crossing_perimeters for the next travel moves
     m_avoid_crossing_perimeters.disable_once = false;
     m_avoid_crossing_perimeters.use_external_mp_once = false;
-    
     // generate G-code for the travel move
     std::string gcode;
     if (needs_retraction)
@@ -3386,12 +3355,11 @@ std::string GCode::travel_to(const Point &point, ExtrusionRole role, std::string
     else
         // Reset the wipe path when traveling, so one would not wipe along an old path.
         m_wipe.reset_path();
-    
     // use G1 because we rely on paths being straight (G0 may make round paths)
     Lines lines = travel.lines();
     if (! lines.empty()) {
         for (const Line &line : lines)
-    	    gcode += m_writer.travel_to_xy(this->point_to_gcode(line.b), comment);    
+    	    gcode += m_writer.travel_to_xy(this->point_to_gcode(line.b), comment);
         this->set_last_pos(lines.back().b);
     }
     return gcode;
@@ -3403,7 +3371,6 @@ bool GCode::needs_retraction(const Polyline &travel, ExtrusionRole role)
         // skip retraction if the move is shorter than the configured threshold
         return false;
     }
-    
     if (role == erSupportMaterial) {
         const SupportLayer* support_layer = dynamic_cast<const SupportLayer*>(m_layer);
         //FIXME support_layer->support_islands.contains should use some search structure!
@@ -3420,7 +3387,6 @@ bool GCode::needs_retraction(const Polyline &travel, ExtrusionRole role)
         // internal infill is enabled (so that stringing is entirely not visible).
         //FIXME any_internal_region_slice_contains() is potentionally very slow, it shall test for the bounding boxes first.
         return false;
-    
     // retract if only_retract_when_crossing_perimeters is disabled or doesn't apply
     return true;
 }
@@ -3428,26 +3394,23 @@ bool GCode::needs_retraction(const Polyline &travel, ExtrusionRole role)
 std::string GCode::retract(bool toolchange)
 {
     std::string gcode;
-    
     if (m_writer.extruder() == nullptr)
         return gcode;
-    
     // wipe (if it's enabled for this extruder and we have a stored wipe path)
     if (EXTRUDER_CONFIG(wipe) && m_wipe.has_path()) {
         gcode += toolchange ? m_writer.retract_for_toolchange(true) : m_writer.retract(true);
         gcode += m_wipe.wipe(*this, toolchange);
     }
-    
     /*  The parent class will decide whether we need to perform an actual retraction
-        (the extruder might be already retracted fully or partially). We call these 
+        (the extruder might be already retracted fully or partially). We call these
         methods even if we performed wipe, since this will ensure the entire retraction
         length is honored in case wipe path was too short.  */
     gcode += toolchange ? m_writer.retract_for_toolchange() : m_writer.retract();
-    
+
     gcode += m_writer.reset_e();
     if (m_writer.extruder()->retract_length() > 0 || m_config.use_firmware_retraction)
         gcode += m_writer.lift();
-    
+
     return gcode;
 }
 
@@ -3455,11 +3418,11 @@ std::string GCode::set_extruder(unsigned int extruder_id, double print_z)
 {
     if (!m_writer.need_toolchange(extruder_id))
         return "";
-    
+
     // if we are running a single-extruder setup, just set the extruder and return nothing
     if (!m_writer.multiple_extruders) {
         m_placeholder_parser.set("current_extruder", extruder_id);
-        
+
         std::string gcode;
         // Append the filament start G-code.
         const std::string &start_filament_gcode = m_config.start_filament_gcode.get_at(extruder_id);
@@ -3471,13 +3434,13 @@ std::string GCode::set_extruder(unsigned int extruder_id, double print_z)
         gcode += m_writer.toolchange(extruder_id);
         return gcode;
     }
-    
+
     // prepend retraction on the current extruder
     std::string gcode = this->retract(true);
 
     // Always reset the extrusion path, even if the tool change retract is set to zero.
     m_wipe.reset_path();
-    
+
     if (m_writer.extruder() != nullptr) {
         // Process the custom end_filament_gcode. set_extruder() is only called if there is no wipe tower
         // so it should not be injected twice.
@@ -3489,7 +3452,7 @@ std::string GCode::set_extruder(unsigned int extruder_id, double print_z)
         }
     }
 
-    
+
     // If ooze prevention is enabled, park current extruder in the nearest
     // standby point and set it to the standby temperature.
     if (m_ooze_prevention.enable && m_writer.extruder() != nullptr)
@@ -3538,7 +3501,7 @@ std::string GCode::set_extruder(unsigned int extruder_id, double print_z)
     // Set the new extruder to the operating temperature.
     if (m_ooze_prevention.enable)
         gcode += m_ooze_prevention.post_toolchange(*this);
-    
+
     return gcode;
 }
 
